@@ -23,7 +23,7 @@ const tui: TuiPlugin = async (api) => {
   api.route.register([
     {
       name: "sibyl",
-      render: () => <LayoutManager ptyManager={ptyManager} initialPanes={initialRoot.children} />,
+      render: () => <LayoutManager ptyManager={ptyManager} model={initialRoot} />,
     },
   ])
   api.keymap.registerLayer({
