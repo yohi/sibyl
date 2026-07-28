@@ -552,16 +552,18 @@ export class PtyManager {
   ): PtyHandle {
     const originalOnData = handle.onData.bind(handle)
     const originalOnExit = handle.onExit.bind(handle)
-    let dataReplayed = false
-    let exitReplayed = false
+    const dataReplayedCallbacks = new Set<(data: string) => void>()
+    const exitReplayedCallbacks = new Set<
+      (event: { exitCode: number; signal?: number }) => void
+    >()
     return {
       ...handle,
       onData: (callback) => {
         if (this.dataCallbacks.get(id)?.has(callback)) {
           return originalOnData(callback)
         }
-        if (!dataReplayed) {
-          dataReplayed = true
+        if (!dataReplayedCallbacks.has(callback)) {
+          dataReplayedCallbacks.add(callback)
           for (const data of pendingData) callback(data)
         }
         return originalOnData(callback)
@@ -570,8 +572,8 @@ export class PtyManager {
         if (this.exitCallbacks.get(id)?.has(callback)) {
           return originalOnExit(callback)
         }
-        if (!exitReplayed) {
-          exitReplayed = true
+        if (!exitReplayedCallbacks.has(callback)) {
+          exitReplayedCallbacks.add(callback)
           if (pendingExit) callback(pendingExit)
         }
         return originalOnExit(callback)
