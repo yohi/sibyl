@@ -45,9 +45,9 @@
 
 以下のコンポーネントを設計段階で明確化する。
 
-- `PaneBackend` 抽象：ペイン生成・リサイズ・入力・終了の共通 I/F
-- `TmuxPaneBackend`：既存 `@oh-my-opencode/tmux-core` を使う実装
-- `OpenTuiPaneBackend`：新しい OpenTUI + PTY 実装
+- `PaneBackend` 抽象：ペイン生成・リサイズ・入力・終了の共通 I/F（Sibyl 本体が提供）
+- `OpenTuiPaneBackend`：新しい OpenTUI + PTY 実装（Sibyl 本体が提供）
+- `TmuxPaneBackend`：既存 Tmux 版実装のコンセプト。Sibyl 本体には含めず、別パッケージまたは外部アダプターで提供する。
 - `LayoutManager`：ペイン分割・フォーカス・クローズを管理
 - `PtyManager`：PTY プロセスのライフサイクルを一元管理
 
@@ -134,11 +134,9 @@ OpenCode プラグインとして `process.on("SIGINT")` を多用すると、�
 | ファイル | 責務 |
 | :--- | :--- |
 | `src/pane-backend.ts` | `PaneBackend` 抽象 I/F |
-| `src/tmux-pane-backend.ts` | Tmux 版実装 |
 | `src/opentui-pane-backend.ts` | OpenTUI 版実装 |
 | `src/pty-manager.ts` | `node-pty` プロセス管理 |
 | `src/layout-manager.ts` | ペイン分割・フォーカス・クローズ |
-
 ### 2.7 `node-pty` のネイティブ依存と Bun 実行環境の懸念
 
 #### 現状
@@ -151,9 +149,8 @@ Bun で `node-pty` の prebuilt binary が正しく動作する保証がない�
 
 #### 提案
 
-- 初期実装では `node-pty` を使うが、Bun 互換テストを CI に入れる。
-- 必要に応じて `bun-pty` または自前 PTY wrapper へのフォールバックを設計し、実行時にランタイムを判定して切り替える。
-
+- `node-pty` は optional dependency として扱い、ランタイム判定後に動的 `import()` で読み込む。Bun では `node-pty` の prebuilt binary が利用できない場合があるため、`bun-pty` 等の代替実装、または自前 PTY wrapper へのフォールバックを設計し、実行時にランタイムを判定して切り替える。
+- 各ランタイムで必要な依存関係は配布時に確実に含め、CI で Node.js / Bun の両方を検証する。
 ### 2.8 ANSI エスケープの取り扱いが要件書にない
 
 #### 現状
@@ -194,10 +191,9 @@ PTY 出力を `TextRenderable.content` にそのまま流すと、ANSI コード
 │  ├─ src/pane.tsx                     │
 │  ├─ src/pty-manager.ts               │
 │  ├─ src/pane-backend.ts              │
-│  ├─ src/tmux-pane-backend.ts         │
 │  └─ src/opentui-pane-backend.ts      │
 ├─────────────────────────────────────┤
-│  node-pty                            │
+│  node-pty / runtime-specific PTY     │
 │  └─ PTY spawned subprocesses         │
 └─────────────────────────────────────┘
 ```
@@ -210,18 +206,21 @@ PTY 出力を `TextRenderable.content` にそのまま流すと、ANSI コード
 | `LayoutManager` | ペインの生成、分割、フォーカス移動、クローズ |
 | `Pane` | 1つのペインに対応する Solid コンポーネント。`ScrollBox` + `TextRenderable` + フォーカス状態 |
 | `PaneBackend` | ペインをどの技術で実現するかの抽象 I/F |
-| `TmuxPaneBackend` | Tmux 版実装（既存互換） |
-| `OpenTuiPaneBackend` | OpenTUI + PTY 版実装（新規） |
+| `TmuxPaneBackend` | Tmux 版実装（Sibyl 本体には含めず、別パッケージまたは外部アダプターで提供） |
 
 ### 3.2 クリーンアップフロー
 
 ```text
 running
   ├─ pane close / SIGTERM
+  │     ├─ kill PTY process group (POSIX) or terminal.kill() (Windows)
+  │     ├─ wait for PTY and descendant processes to exit
   │     ├─ exited ──► dispose renderable / dispose PTY subscription
   │     └─ timeout 1.5s ──► SIGKILL ──► dispose
   └─ host dispose hook
         └─ all PTYs ──► SIGTERM ──► timeout ──► SIGKILL
+
+再入可能な dispose: pane close・SIGTERM・host dispose が重複して呼ばれても安全。PTY 本体と shell が起動した子孫プロセスが終了し、タイムアウト後に強制終了されることをテストで検証する。
 ```
 
 ---
@@ -230,7 +229,7 @@ running
 
 | リスク | 影響 | 対応 |
 | :--- | :--- | :--- |
-| `node-pty` が Bun で動かない | プラグインが起動しない | CI で Bun テスト。必要なら `bun-pty` 等へのフォールバック設計。 |
+| `node-pty` が Bun で動かない | プラグインが起動しない | `node-pty` を optional dependency ・動的 `import()` とし、Bun では代替 PTY 実装（`bun-pty` 等が利用可能であればそれ、なければ自前 wrapper）へフォールバック。CI で Node.js / Bun の両方を検証する。 |
 | OpenTUI API の破壊的変更 | プラグインが動作不良 | peer dependency で `>=0.4.5 <1` 等の上限を設ける。 |
 | 大量の ANSI 出力で描画遅延 | 非機能要件未達 | 初期は strip、将来的に NativeSpanFeed / セルマトリクス方式へ移行。 |
 | キー入力のホストとの競合 | 操作性低下 | `api.keymap` と `useKeyboard` の責務を分離。 |

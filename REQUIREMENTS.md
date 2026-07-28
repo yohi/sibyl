@@ -1,6 +1,6 @@
 # 要件定義：OpenTUIによる「Tmuxを使わない」マルチペイン統合
 
-本ドキュメントは、現在 `@oh-my-opencode/tmux-core` および Tmux コマンドに依存しているサブエージェント起動・画面分割・対話処理を、**OpenTUI および PTY（疑似端末）を用いて単一プロセス内で完結させる新アーキテクチャ**の要件定義書です。
+本ドキュメントは、現在 `oh-my-openagent` の Tmux コアおよび Tmux コマンドに依存しているサブエージェント起動・画面分割・対話処理を、**OpenTUI および PTY（疑似端末）を用いて単一プロセス内で完結させる新アーキテクチャ**の要件定義書です。
 
 ---
 
@@ -21,6 +21,7 @@
 > **実装の前提条件：OpenCode プラグインとしての設計**
 > 本アーキテクチャのインプリメンテーションは、**OpenCode のプラグイン（Plugin）** として機能するように設計します。
 > したがって、PTY プロセスの起動や TUI 上の表示コンポーネントの追加などは、OpenCode が提供するプラグイン API やイベントシステムを介してフック・拡張可能な形で実装される必要があります。これにより、コアロジックを汚さずにペイン分割機能を疎結合に統合します。
+> 本プラグインは `oh-my-openagent` の Tmux コアには依存しません。概念上の Tmux 実装との差し替えを可能にするため、`PaneBackend` 抽象は提供しますが、Tmux 版の具体実装は別パッケージまたは外部アダプターに委ねます。
 
 ---
 
@@ -52,25 +53,26 @@ graph TD
 - **仕様**: Solid.js のコンポーネント構成に基づき、画面上に動的に新規ペイン（ログ領域や入力領域）を生成する。
 - **詳細**:
   - 横分割（`-h`）および縦分割（`-v`）を、OpenTUI のレイアウトツリー（`yoga.ts`）に `<box>` または `<scrollbox>` を動的に追加することで表現する。
-  - 現在の Tmux コアの実装（[pane-spawn.ts](file:///home/y_ohi/program/oss/oh-my-openagent/packages/tmux-core/src/tmux-utils/pane-spawn.ts)）で定義されているような、サイズ指定や比率の保持を OpenTUI の Flexbox スタイル（`flexGrow`, `flexBasis` 等）で制御する。
+  - サイズ指定や比率の保持は、OpenTUI の Flexbox スタイル（`flexGrow`, `flexBasis` 等）で制御する。
 
 ### F2: 外部プロセス（PTY）のインテグレーション
 - **仕様**: サブエージェントやシェルなどの外部コマンドを、Tmux の代わりに OS 依存の PTY ライブラリ（例: `node-pty`）を介して非同期起動する。
 - **詳細**:
   - PTY プロセスのライフサイクル（起動、終了、強制終了）を、CLI アプリケーションのメインプロセス側で完全に追従する。
-  - PTY からの出力（バイナリ/ANSI シーケンス）をキャプチャし、OpenTUI の描画バッファ（[text-buffer.ts](file:///home/y_ohi/program/oss/opentui/packages/core/src/text-buffer.ts) 等）へリアルタイムに同期・描画する。
+  - PTY からの出力（バイナリ/ANSI シーケンス）をキャプチャし、**ANSI エスケープを除去または簡易忽略した上で `TextRenderable` へ反映し、`ScrollBox` を通じて表示する**。直接 OpenTUI の内部バッファ実装（`text-buffer.ts` 等）へ書き込むことは行わない。
 
 ### F3: 入力イベントのルーティング（インタラクティブ操作）
 - **仕様**: フォーカスされているペインに対してキー入力を直接バックグラウンドプロセスに流し込む。
 - **詳細**:
-  - OpenTUI の [useKeyboard](file:///home/y_ohi/program/oss/opentui/packages/solid/src/index.ts) などを利用し、特定ペインがアクティブな場合の入力をインターセプトする。
+  - OpenTUI の `useKeyboard` などを利用し、特定ペインがアクティブな場合の入力をインターセプトする。
   - キャプチャしたキー入力を、対応する PTY プロセスの標準入力 (`stdin.write`) にルーティングし、プロセス内での対話操作（`read` 待ちやシェル対話）を可能にする。
 
 ### F4: ペインのライフサイクルとクリーンアップ
 - **仕様**: ペインの閉鎖やプロセスの終了時に、リソースを漏れなく解放する。
 - **詳細**:
   - ユーザーがペインを閉じた際、対応する PTY プロセスに `SIGTERM` / `SIGKILL` を送信して安全に終了させる。
-  - ゾンビプロセスが残るのを防ぐため、メインプロセスの `SIGINT` や `EXIT` イベント発生時にすべての起動中 PTY を一括クリーンアップする仕組みを実装する。
+  - クリーンアップの主経路は **OpenCode プラグインの終了処理**（server 側 `dispose()` hook / TUI 側 `api.lifecycle.onDispose()`）とし、ペイン終了時・プラグイン終了時にすべての起動中 PTY を確実に停止する。
+  - `SIGINT` や `EXIT` などのプロセスイベントは、二重登録や `process.exit()` 中の非同期処理に依存せず、**同期的な最終フォールバック**としてのみ扱う。
 
 ---
 
@@ -78,8 +80,8 @@ graph TD
 
 | 区分 | 要件項目 | 目標・仕様 |
 | :--- | :--- | :--- |
-| **ポータビリティ** | マルチプラットフォーム対応 | `tmux` のインストールされていない環境（Windows, 軽量Dockerイメージなど）でも同様にマルチペイン表示が動作すること。 |
-| **パフォーマンス**| レンダリング遅延の極小化 | プロセスの出力が 50ms 以内に TUI 描画バッファへ反映され、スクロールがスムーズであること。 |
+| **ポータビリティ** | マルチプラットフォーム対応 | `tmux` のインストールされていない環境でもマルチペイン表示が動作すること。受入条件として、少なくとも以下を検証する：Windows（PowerShell/cmd 既定 shell）、macOS（zsh 既定 shell）、Linux（bash 既定 shell）、軽量 Docker イメージ、Node.js ランタイム、Bun ランタイム、CI（GitHub Actions の ubuntu-latest / macos-latest / windows-latest）。`node-pty` のネイティブ addon は対象 OS・ランタイムでビルド・動作確認を行う。 |
+| **パフォーマンス**| レンダリング遅延の極小化 | PTY の `onData` イベント発火から、OpenTUI 表示バッファ（`TextRenderable.content`）への反映が 1 フレーム（≒ 16ms）以内に完了すること。運用目標として、ユーザー体感遅延は 95 パーセンタイルで 50ms 以下、99 パーセンタイルで 100ms 以下とする。測定は出力頻度 100Hz、スクロール込みの実運用負荷下で 1000 サンプル以上を対象とする。 |
 | **堅牢性** | プロセスの排他とクリーンアップ | エージェントプロセスの異常終了時、親の TUI プロセスが巻き込まれてクラッシュしないこと。 |
 
 ---
@@ -91,4 +93,4 @@ graph TD
 2. **フェーズ2：入力ルーティングの統合**
    - キーボード入力をフォーカスのある PTY にルーティングする仕組みを実装し、対話型シェルが OpenTUI 内で動くことを確認。
 3. **フェーズ3：レイアウトマネージャーの抽象化**
-   - 現行の [action-executor.ts](file:///home/y_ohi/program/oss/oh-my-openagent/packages/omo-opencode/src/features/tmux-subagent/action-executor.ts) が呼び出している `spawnTmuxPane` 等のインターフェースを抽象化し、`Tmux` 物理ペインへの配分と、`OpenTUI` 仮想ペインへの配分を切り替え可能にする。
+   - `spawnTmuxPane` 等のインターフェースを抽象化し、`Tmux` 物理ペインへの配分と、`OpenTUI` 仮想ペインへの配分を切り替え可能にする。

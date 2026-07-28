@@ -10,9 +10,10 @@
 
 ## Global Constraints
 
-- `package.json` は `"type": "module"` とし、`exports["./server"]` / `exports["./tui"]` を提供する。
+- `package.json` は `"type": "module"` とし、ルート import 用の `exports["."]` と `exports["./server"]` / `exports["./tui"]` を提供する。
 - OpenCode engine: `^1.18.8` 以上。
-- OpenTUI peer dependencies: `@opentui/core`, `@opentui/solid`, `@opentui/keymap` は `>=0.4.5`（上限は実装時の安定版に応じて `<1` とする）。
+- OpenTUI peer dependencies: `@opentui/core`, `@opentui/solid`, `@opentui/keymap` はすべて `>=0.4.5 <1` とする。
+- `@types/bun` と CI の Bun はともに `1.1.17` に固定し、lockfile と合わせて再現可能なビルドにする。
 - 絶対パスは使用しない。環境変数または相対パスで解決する。
 - 型安全: `as any`, `@ts-ignore`, `@ts-expect-error` は禁止。
 - エラーハンドリング: 空の catch ブロックは禁止。
@@ -35,13 +36,14 @@
 | `src/pane.tsx` | 1ペインを表す Solid コンポーネント |
 | `src/pane-backend.ts` | `PaneBackend` 抽象インターフェース |
 | `src/opentui-pane-backend.ts` | OpenTUI + PTY 版の `PaneBackend` 実装 |
-- Create: `src/tmux-pane-backend.ts` | Tmux 版の `PaneBackend` 実装（参考・比較対象、依存関係なし、初期は stub 可）
 | `src/ansi-strip.ts` | 簡易 ANSI strip / 制御コード除去 |
 | `tests/pty-manager.test.ts` | `PtyManager` の単体テスト |
 | `tests/layout-manager.test.tsx` | `LayoutManager` + `Pane` のテスト |
 | `tests/opentui-pane-backend.test.ts` | OpenTUI 版バックエンドのテスト |
 | `tests/ansi-strip.test.ts` | ANSI strip のテスト |
 | `.github/workflows/ci.yml` | CI：build, lint, test |
+
+`TmuxPaneBackend` は Sibyl 本体には作成しない。必要な場合は `PaneBackend` を実装する別パッケージまたは外部アダプターとして提供する。
 
 ---
 
@@ -51,6 +53,7 @@
 - Create: `package.json`
 - Create: `tsconfig.json`
 - Create: `.gitignore`
+- Create: `src/index.ts`（ルート export と空でない初回ビルド用）
 - Modify: `README.md`（既存の簡易内容を拡張）
 
 **Interfaces:**
@@ -66,6 +69,10 @@
   "description": "OpenTUI + PTY multi-pane plugin for OpenCode",
   "type": "module",
   "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
     "./server": {
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
@@ -76,7 +83,8 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc --emitDeclarationOnly && rollup -c",
+    "build:types": "tsc --emitDeclarationOnly",
     "test": "bun test",
     "lint": "biome check .",
     "lint:fix": "biome check --write ."
@@ -86,16 +94,20 @@
   },
   "peerDependencies": {
     "@opencode-ai/plugin": "^1.18.8",
-    "@opentui/core": ">=0.4.5",
-    "@opentui/keymap": ">=0.4.5",
-    "@opentui/solid": ">=0.4.5"
+    "@opentui/core": ">=0.4.5 <1",
+    "@opentui/keymap": ">=0.4.5 <1",
+    "@opentui/solid": ">=0.4.5 <1"
   },
-  "dependencies": {
+  "optionalDependencies": {
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
-    "@types/bun": "latest",
+    "@rollup/plugin-babel": "^6.0.4",
+    "@rollup/plugin-node-resolve": "^15.3.0",
+    "@types/bun": "1.1.17",
+    "babel-preset-solid": "^1.9.3",
+    "rollup": "^4.28.0",
     "typescript": "^5.7.0"
   }
 }
@@ -125,7 +137,44 @@
 }
 ```
 
-- [ ] **Step 3: .gitignore を作成する**
+`jsx: "preserve"` は型検査・宣言出力のために維持する。一方、公開用 JavaScript は JSX を実行できる形へ変換しなければならないため、`build` では `rollup` + `babel-preset-solid`（または同等の Solid JSX 対応 bundler）による Solid JSX 変換ステップを必ず実行する。`dist/tui.js` が生成されることを build 確認の受入条件に含める。
+
+- [ ] **Step 1.5: `rollup.config.js` と `babel.config.json` を作成する**
+
+```js
+// rollup.config.js
+import { nodeResolve } from "@rollup/plugin-node-resolve"
+import babel from "@rollup/plugin-babel"
+
+const extensions = [".ts", ".tsx"]
+
+export default [
+  {
+    input: "src/index.ts",
+    output: { file: "dist/index.js", format: "esm" },
+    external: [/^@opencode-ai/, /^@opentui/, "node-pty"],
+    plugins: [nodeResolve({ extensions }), babel({ extensions, babelHelpers: "bundled" })],
+  },
+  {
+    input: "src/server.ts",
+    output: { file: "dist/server.js", format: "esm" },
+    external: [/^@opencode-ai/, /^@opentui/, "node-pty"],
+    plugins: [nodeResolve({ extensions }), babel({ extensions, babelHelpers: "bundled" })],
+  },
+  {
+    input: "src/tui.tsx",
+    output: { file: "dist/tui.js", format: "esm" },
+    external: [/^@opencode-ai/, /^@opentui/, "node-pty"],
+    plugins: [nodeResolve({ extensions }), babel({ extensions, babelHelpers: "bundled" })],
+  },
+]
+
+// babel.config.json
+// { "presets": ["solid", "@babel/preset-typescript"] }
+```
+
+- [ ] **Step 3: tsconfig.json を作成する**
+- [ ] **Step 4: .gitignore を作成する**
 
 ```gitignore
 node_modules/
@@ -135,11 +184,11 @@ dist/
 .env
 ```
 
-- [ ] **Step 4: README.md を更新する**
+- [ ] **Step 5: README.md を更新する**
 
 既存の README に以下を追記する。
 
-```markdown
+````markdown
 ## Development
 
 ```bash
@@ -147,17 +196,16 @@ bun install
 bun run build
 bun test
 ```
-```
+````
 
-- [ ] **Step 5: 依存関係をインストールしビルドが通ることを確認する**
+- [ ] **Step 6: 依存関係をインストールしビルドが通ることを確認する**
 
 Run: `bun install`
-Expected: `node_modules/` が作成され、`bun run build` がエラーなく完了する（まだソースがないため空のビルドで OK）。
+Expected: `node_modules/` と `bun.lock` が作成される。先に最小の `src/index.ts` を `export {}` として作成し、空の `include` による `tsc` エラーを避ける。`src/server.ts` / `src/tui.tsx` を build entry に含める完全な `bun run build` の確認は、両ファイルを追加した Task 6 の Step 4 へ移動する。
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
-```bash
-git add package.json tsconfig.json .gitignore README.md
+git add package.json tsconfig.json rollup.config.js babel.config.json .gitignore src/index.ts README.md bun.lock
 git commit -m "chore: プロジェクトセットアップ"
 ```
 
@@ -188,6 +236,19 @@ describe("stripAnsi", () => {
 
   test("removes cursor movement sequences", () => {
     expect(stripAnsi("\x1b[2Kline")).toBe("line")
+  })
+
+  test("removes BEL-terminated OSC titles", () => {
+    expect(stripAnsi("\x1b]0;Sibyl\x07ready")).toBe("ready")
+  })
+
+  test("removes ST-terminated OSC hyperlinks while preserving their label", () => {
+    expect(stripAnsi("\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\")).toBe("link")
+  })
+
+  test("removes an OSC sequence split across received chunks after buffering", () => {
+    const chunks = ["before\x1b]0;title", "\x07after"]
+    expect(stripAnsi(chunks.join(""))).toBe("beforeafter")
   })
 
   test("keeps plain text", () => {
@@ -228,13 +289,16 @@ export interface PaneModel {
 
 ```ts
 // src/ansi-strip.ts
+const OSC_PATTERN = /\x1b\][\s\S]*?(?:\x07|\x1b\\)/g
 const ANSI_PATTERN =
   /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\]|\^[\\@A-Z[\]^_`a-z{|}~]|_[\\\\]^_`a-z{|}~]|\*|[\x80-\x9f])/g
 
 export function stripAnsi(text: string): string {
-  return text.replace(ANSI_PATTERN, "")
+  return text.replace(OSC_PATTERN, "").replace(ANSI_PATTERN, "")
 }
 ```
+
+`stripAnsi` は完結した文字列を処理する純粋関数とする。PTY の分割チャンクでは、`Pane` 側が未完了の OSC（`ESC ]` から BEL または ST まで）を次チャンクと結合してから渡す。上記テストはその境界を含む入力を検証する。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
@@ -271,7 +335,7 @@ describe("PtyManager", () => {
   test("spawns a shell and receives data", async () => {
     const manager = new PtyManager()
     const shell = process.platform === "win32" ? "cmd.exe" : "bash"
-    const pty = manager.spawn({ command: shell, args: [], cols: 80, rows: 24 })
+    const pty = await manager.spawn({ command: shell, args: [], cols: 80, rows: 24 })
 
     const dataPromise = new Promise<string>((resolve) => {
       pty.onData((data) => {
@@ -297,7 +361,7 @@ Expected: `PtyManager` 未定義で FAIL。
 
 ```ts
 // src/pty-manager.ts
-import { spawn, type IPty } from "node-pty"
+import type { IPty } from "node-pty"
 import type { PtyOptions } from "./types.js"
 
 export type PtyId = string
@@ -314,11 +378,23 @@ export class PtyManager {
   private terminals = new Map<PtyId, IPty>()
   private dataSubscriptions = new Map<PtyId, ReturnType<IPty["onData"]>>()
   private exitSubscriptions = new Map<PtyId, ReturnType<IPty["onExit"]>>()
+  private dataCallbacks = new Map<PtyId, Set<(data: string) => void>>()
+  private exitCallbacks = new Map<
+    PtyId,
+    Set<(event: { exitCode: number; signal?: number }) => void>
+  >()
   private exited = new Set<PtyId>()
   private idCounter = 0
+  private nodePtyModule?: Promise<typeof import("node-pty")>
 
-  spawn(options: PtyOptions): PtyHandle {
+  constructor(
+    private readonly loadBunPtyAdapter?: () => Promise<typeof import("node-pty")>,
+    private readonly loadNodePty = () => import("node-pty"),
+  ) {}
+
+  async spawn(options: PtyOptions): Promise<PtyHandle> {
     const id = `pty-${++this.idCounter}`
+    const { spawn } = await this.loadPtyModule()
     const terminal = spawn(options.command, options.args, {
       name: "xterm-256color",
       cols: options.cols ?? 80,
@@ -352,17 +428,29 @@ export class PtyManager {
 
   async terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
     const terminal = this.terminals.get(id)
-    if (!terminal || this.exited.has(id)) {
+    if (!terminal) {
       this.dispose(id)
       return
     }
 
+    let resolveExit = () => {}
     const exitPromise = new Promise<void>((resolve) => {
-      const sub = terminal.onExit(() => {
-        sub.dispose()
-        resolve()
-      })
+      resolveExit = resolve
     })
+    let exitListener: ReturnType<IPty["onExit"]> | undefined
+    exitListener = terminal.onExit(() => {
+      exitListener?.dispose()
+      resolveExit()
+    })
+
+    // onExit を先に登録する。すでに終了済みなら待機せずに解決する。
+    if (this.exited.has(id)) {
+      exitListener?.dispose()
+      resolveExit()
+      await exitPromise
+      this.dispose(id)
+      return
+    }
 
     if (process.platform === "win32") {
       terminal.kill()
@@ -389,29 +477,18 @@ export class PtyManager {
   }
 
   private emitData(_id: PtyId, _data: string): void {
-    // overridden by createHandle callback registration
+    for (const callback of this.dataCallbacks.get(_id) ?? []) {
+      callback(_data)
+    }
   }
 
   private emitExit(_id: PtyId, _event: { exitCode: number; signal?: number }): void {
-    // overridden by createHandle callback registration
+    for (const callback of this.exitCallbacks.get(_id) ?? []) {
+      callback(_event)
+    }
   }
 
   private createHandle(id: PtyId, terminal: IPty): PtyHandle {
-    let dataCallback: ((data: string) => void) | undefined
-    let exitCallback: ((event: { exitCode: number; signal?: number }) => void) | undefined
-
-    this.emitData = (targetId, data) => {
-      if (targetId === id && dataCallback) {
-        dataCallback(data)
-      }
-    }
-
-    this.emitExit = (targetId, event) => {
-      if (targetId === id && exitCallback) {
-        exitCallback(event)
-      }
-    }
-
     return {
       id,
       write: (data) => terminal.write(data),
@@ -419,24 +496,35 @@ export class PtyManager {
         if (cols > 0 && rows > 0 && !this.exited.has(id)) {
           try {
             terminal.resize(cols, rows)
-          } catch {
-            // terminal already exited
+          } catch (error) {
+            if (!this.exited.has(id)) {
+              throw error
+            }
           }
         }
       },
       onData: (callback) => {
-        dataCallback = callback
+        const callbacks =
+          this.dataCallbacks.get(id) ?? new Set<(data: string) => void>()
+        callbacks.add(callback)
+        this.dataCallbacks.set(id, callbacks)
         return () => {
-          if (dataCallback === callback) {
-            dataCallback = undefined
+          callbacks.delete(callback)
+          if (callbacks.size === 0) {
+            this.dataCallbacks.delete(id)
           }
         }
       },
       onExit: (callback) => {
-        exitCallback = callback
+        const callbacks =
+          this.exitCallbacks.get(id) ??
+          new Set<(event: { exitCode: number; signal?: number }) => void>()
+        callbacks.add(callback)
+        this.exitCallbacks.set(id, callbacks)
         return () => {
-          if (exitCallback === callback) {
-            exitCallback = undefined
+          callbacks.delete(callback)
+          if (callbacks.size === 0) {
+            this.exitCallbacks.delete(id)
           }
         }
       },
@@ -448,14 +536,27 @@ export class PtyManager {
     this.exitSubscriptions.get(id)?.dispose()
     this.dataSubscriptions.delete(id)
     this.exitSubscriptions.delete(id)
+    this.dataCallbacks.delete(id)
+    this.exitCallbacks.delete(id)
     this.terminals.delete(id)
     this.exited.delete(id)
   }
+
+  private async loadPtyModule(): Promise<typeof import("node-pty")> {
+    if (typeof process.versions.bun === "string" && this.loadBunPtyAdapter) {
+      return this.loadBunPtyAdapter()
+    }
+    this.nodePtyModule ??= this.loadNodePty().catch((error: unknown) => {
+      throw new Error("No compatible PTY adapter is available", { cause: error })
+    })
+    return this.nodePtyModule
+  }
 }
 ```
-注: 上記 `emitData` / `emitExit` は各 handle 作成時に上書きされるため、複数 handle では最後のものだけ有効になる。これは設計上のバグであるため、実装時に `Map<PtyId, Set<callback>>` 方式に修正すること。
 
-**Task 3 完成時の条件:** `PtyManager` は単一 PTY の spawn / write / resize / terminate / イベント購読を実装する。複数 PTY を同時に動作させるには Task 8 以降で `Pane` コンポーネントが `PtyManager` と接続する際、コールバックを handle ごとに独立して管理する必要がある。実装では `Map<PtyId, Set<(data: string) => void>>` と `Map<PtyId, Set<(event) => void>>` を使い、同じ PTY ハンドルに複数の購読者がいても、また異なる PTY ハンドルが同時に存在しても、それぞれのコールバックが正しく呼ばれるように修正すること。Task 8 では `tests/layout-manager.test.tsx` に 2 ペイン同時起動・出力受信・終了通知のテストケースを追加し、複数 PTY のイベント配送が壊れていないことを検証する。
+`node-pty` は optional dependency であるため、静的 runtime import は禁止する。`PtyManager` はランタイムを判定してから `import("node-pty")`（または Bun 用の注入済みアダプター）を選択し、失敗時は利用可能な PTY アダプターを案内するエラーを返す。`spawn()` はこのロードを await するため非同期 API とし、呼び出し側も await する。イベント配送は `Map<PtyId, Set<callback>>` で実装済みとし、複数 handle・複数購読者でも独立して通知する。
+
+**Task 3 完成時の条件:** `PtyManager` は非同期の spawn / write / resize / terminate / イベント購読を実装する。`node-pty` はランタイム判定後にのみ動的ロードし、複数 PTY・複数購読者のデータ／終了イベントを `Map<PtyId, Set<callback>>` で正しく配送する。終了済み PTY の `terminate()` は exit listener を登録した後に即時 resolve し、待機しない。Task 8 の実レンダリングテストでは 2 ペイン同時起動・出力受信・終了通知も検証する。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
@@ -476,12 +577,11 @@ git commit -m "feat: PtyManagerを追加"
 **Files:**
 - Create: `src/pane-backend.ts`
 - Create: `src/opentui-pane-backend.ts`
-- Create: `src/tmux-pane-backend.ts`（stub）
 - Create: `tests/opentui-pane-backend.test.ts`
 
 **Interfaces:**
 - Consumes: `PtyManager`, `stripAnsi`, `PtyOptions`
-- Produces: `PaneBackend` interface, `OpenTuiPaneBackend`, `TmuxPaneBackend` stub
+- Produces: `PaneBackend` interface, `OpenTuiPaneBackend`
 
 - [ ] **Step 1: 失敗するテストを書く**
 
@@ -543,22 +643,7 @@ export class OpenTuiPaneBackend implements PaneBackend {
 }
 ```
 
-```ts
-// src/tmux-pane-backend.ts
-import type { PaneBackend } from "./pane-backend.js"
-import type { PaneModel, PtyOptions } from "./types.js"
-
-let idCounter = 0
-
-export class TmuxPaneBackend implements PaneBackend {
-  create(options: PtyOptions): PaneModel {
-    return {
-      id: `tmux-pane-${++idCounter}`,
-      ptyOptions: options,
-    }
-  }
-}
-```
+Tmux 実装の stub は作成しない。`TmuxPaneBackend` が必要な利用者は、Sibyl が公開する `PaneBackend` interface を実装する外部アダプターまたは別パッケージとして提供する。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
@@ -568,8 +653,8 @@ Expected: PASS。
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/pane-backend.ts src/opentui-pane-backend.ts src/tmux-pane-backend.ts tests/opentui-pane-backend.test.ts
-git commit -m "feat: PaneBackend抽象とOpenTUI/Tmux実装を追加"
+git add src/pane-backend.ts src/opentui-pane-backend.ts tests/opentui-pane-backend.test.ts
+git commit -m "feat: PaneBackend抽象とOpenTUI実装を追加"
 ```
 
 ---
@@ -611,10 +696,10 @@ Expected: FAIL（`Pane` 未定義）。
 ```tsx
 // src/pane.tsx
 /** @jsxImportSource @opentui/solid */
-import { createSignal, onCleanup } from "solid-js"
+import { createSignal, onCleanup, onMount } from "solid-js"
 import { useKeyboard } from "@opentui/solid"
 import type { PaneModel } from "./types.js"
-import type { PtyManager, PtyHandle } from "./pty-manager.js"
+import type { PtyHandle, PtyId, PtyManager } from "./pty-manager.js"
 import { stripAnsi } from "./ansi-strip.js"
 
 export interface PaneProps {
@@ -622,38 +707,66 @@ export interface PaneProps {
   ptyManager: PtyManager
   focused: boolean
   onFocus: () => void
+  onPtyReady: (paneId: string, ptyId: PtyId) => void
   cols: number
   rows: number
 }
 
 export function Pane(props: PaneProps) {
+  const MAX_OUTPUT_LINES = 1000
   const [output, setOutput] = createSignal("")
   let ptyHandle: PtyHandle | undefined
+  let disposed = false
+  let pendingOsc = ""
+  let removeDataListener = () => {}
+  let removeExitListener = () => {}
 
-  if (props.model.ptyOptions) {
-    ptyHandle = props.ptyManager.spawn(props.model.ptyOptions)
-
-    const removeDataListener = ptyHandle.onData((data) => {
-      setOutput((prev) => prev + stripAnsi(data))
-    })
-
-    const removeExitListener = ptyHandle.onExit(() => {
-      removeDataListener()
-      removeExitListener()
-    })
-
-    onCleanup(async () => {
-      removeDataListener()
-      removeExitListener()
-      if (ptyHandle) {
-        await props.ptyManager.terminate(ptyHandle.id)
-      }
+  const appendOutput = (data: string) => {
+    const raw = pendingOsc + data
+    const lastOscStart = raw.lastIndexOf("\x1b]")
+    const lastOsc = lastOscStart === -1 ? "" : raw.slice(lastOscStart)
+    const isIncompleteOsc =
+      lastOscStart !== -1 && !/(?:\x07|\x1b\\)/.test(lastOsc)
+    const complete = isIncompleteOsc ? raw.slice(0, lastOscStart) : raw
+    pendingOsc = isIncompleteOsc ? lastOsc : ""
+    setOutput((previous) => {
+      const lines = `${previous}${stripAnsi(complete)}`.split(/\r?\n/)
+      return lines.slice(-MAX_OUTPUT_LINES).join("\n")
     })
   }
 
+  onMount(() => {
+    if (!props.model.ptyOptions) return
+    void props.ptyManager
+      .spawn(props.model.ptyOptions)
+      .then((handle) => {
+        if (disposed) {
+          void props.ptyManager.terminate(handle.id)
+          return
+        }
+        ptyHandle = handle
+        props.onPtyReady(props.model.id, handle.id)
+        removeDataListener = handle.onData(appendOutput)
+        removeExitListener = handle.onExit(() => {
+          removeDataListener()
+          removeExitListener()
+        })
+      })
+      .catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        appendOutput(`PTY start failed: ${message}\n`)
+      })
+  })
+
+  onCleanup(() => {
+    disposed = true
+    removeDataListener()
+    removeExitListener()
+  })
+
   useKeyboard((e) => {
     if (!props.focused || !ptyHandle) return
-    ptyHandle.write(e.name)
+    ptyHandle.write(e.sequence ?? e.raw ?? e.name)
   })
 
   return (
@@ -677,7 +790,7 @@ export function Pane(props: PaneProps) {
 /** @jsxImportSource @opentui/solid */
 import { createSignal, For } from "solid-js"
 import type { PaneModel, SplitDirection } from "./types.js"
-import type { PtyManager } from "./pty-manager.js"
+import type { PtyId, PtyManager } from "./pty-manager.js"
 import { Pane } from "./pane.js"
 
 export interface LayoutManagerProps {
@@ -690,13 +803,21 @@ export function LayoutManager(props: LayoutManagerProps) {
   const [focusedId, setFocusedId] = createSignal<string | undefined>(
     props.initialPanes[0]?.id,
   )
+  const ptyIdsByPane = new Map<string, PtyId>()
 
   const splitPane = (id: string, direction: SplitDirection) => {
     setPanes((prev) => addPaneAt(prev, id, direction))
   }
 
-  const closePane = (id: string) => {
-    setPanes((prev) => prev.filter((p) => p.id !== id))
+  const closePane = async (id: string) => {
+    const ptyId = ptyIdsByPane.get(id)
+    if (ptyId) {
+      await props.ptyManager.terminate(ptyId)
+      ptyIdsByPane.delete(id)
+    }
+    const nextPanes = panes().filter((pane) => pane.id !== id)
+    setPanes(nextPanes)
+    setFocusedId((focused) => (focused === id ? nextPanes[0]?.id : focused))
   }
 
   return (
@@ -708,6 +829,7 @@ export function LayoutManager(props: LayoutManagerProps) {
             ptyManager={props.ptyManager}
             focused={focusedId() === pane.id}
             onFocus={() => setFocusedId(pane.id)}
+            onPtyReady={(paneId, ptyId) => ptyIdsByPane.set(paneId, ptyId)}
             cols={80}
             rows={24}
           />
@@ -726,6 +848,8 @@ function addPaneAt(
   return [...panes]
 }
 ```
+
+`Pane` の表示出力は最大 1000 行の bounded buffer とし、超過した先頭行を破棄する。`onCleanup` は購読解除だけを同期的に行い、PTY を終了しない。ペイン操作や UI の close 要求は親の `LayoutManager.closePane()` に集約し、`PtyManager.terminate()` を await してから PaneModel を状態から除去する。Task 9 ではこの close 処理を再帰ツリーに拡張する。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
@@ -782,7 +906,9 @@ import { PtyManager } from "./pty-manager.js"
 import { OpenTuiPaneBackend } from "./opentui-pane-backend.js"
 
 const tui: TuiPlugin = async (api) => {
-  const ptyManager = new PtyManager()
+  // node-pty は静的 import しない。PtyManager がランタイム判定後にこの
+  // loader を呼び、Bun 用アダプターがあればそれを優先する。
+  const ptyManager = new PtyManager(undefined, () => import("node-pty"))
   const backend = new OpenTuiPaneBackend()
 
   api.route.register([
@@ -793,14 +919,13 @@ const tui: TuiPlugin = async (api) => {
           ptyManager={ptyManager}
           initialPanes={[
             backend.create({
-              command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL ?? "/bin/sh",
+              command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
               args: [],
               cols: 80,
               rows: 24,
             }),
           ]}
         />
-      ),
     },
   ])
 
@@ -842,7 +967,7 @@ export default plugin
 - [ ] **Step 4: テストが通ることを確認する**
 
 Run: `bun test tests/tui.test.ts`
-Expected: PASS。
+Expected: PASS。続けて `bun run build` を実行し、JSX 変換済みの `dist/tui.js` が存在することを確認する（例: `bun -e 'import { existsSync } from "node:fs"; if (!existsSync("dist/tui.js")) process.exit(1)'`）。
 
 - [ ] **Step 5: Commit**
 
@@ -943,7 +1068,7 @@ git commit -m "feat: Server pluginエントリを追加"
 
 ```tsx
 // tests/layout-manager.test.tsx（追記）
-test("nested panes split horizontally", () => {
+test("nested panes render as horizontal children and route focus", () => {
   const tree: PaneModel = {
     id: "root",
     direction: "horizontal",
@@ -953,10 +1078,17 @@ test("nested panes split horizontally", () => {
     ],
   }
 
-  expect(tree.direction).toBe("horizontal")
-  expect(tree.children).toHaveLength(2)
+  const view = renderOpenTui(
+    <LayoutManager model={tree} ptyManager={fakePtyManager} />,
+  )
+
+  expect(view.panes()).toHaveLength(2)
+  expect(view.focusedPaneId()).toBe("left")
+  expect(view.layoutFor(tree.id)).toHaveProperty("flexDirection", "row")
 })
 ```
+
+`renderOpenTui` は採用した OpenTUI バージョンの test renderer を使うテスト helper とする。`PaneModel` の shape だけを検査するテストは削除し、`LayoutManager` と `Pane` を実際にレンダリングして、入れ子方向・フォーカス表示・PTY の `spawn` / `onData` / `onExit` 購読・close 要求を検証する。少なくとも 2 ペイン同時起動時に、各ペインの出力と終了通知が相互に混線しないことを含める。
 
 - [ ] **Step 2: テストが失敗することを確認する**
 
@@ -970,25 +1102,42 @@ Expected: FAIL（`LayoutManager` が tree 構造に未対応）。
 /** @jsxImportSource @opentui/solid */
 import { createSignal, For, Show } from "solid-js"
 import type { PaneModel } from "./types.js"
-import type { PtyManager } from "./pty-manager.js"
+import type { PtyId, PtyManager } from "./pty-manager.js"
 import { Pane } from "./pane.js"
 
 export interface LayoutManagerProps {
   ptyManager: PtyManager
   model: PaneModel
-  focusedId?: string
-  onFocus?: (id: string) => void
+  initialFocusedId?: string
 }
 
 export function LayoutManager(props: LayoutManagerProps) {
+  const [model, setModel] = createSignal(props.model)
   const [focusedId, setFocusedId] = createSignal(
-    props.focusedId ?? props.model.id,
+    props.initialFocusedId ?? firstLeafId(props.model),
   )
+  const ptyIdsByPane = new Map<string, PtyId>()
 
-  const handleFocus = (id: string) => {
-    setFocusedId(id)
-    props.onFocus?.(id)
-  }
+  return (
+    <LayoutNode
+      model={model()}
+      ptyManager={props.ptyManager}
+      focusedId={focusedId()}
+      onFocus={setFocusedId}
+      onPtyReady={(paneId, ptyId) => ptyIdsByPane.set(paneId, ptyId)}
+    />
+  )
+}
+
+interface LayoutNodeProps {
+  model: PaneModel
+  ptyManager: PtyManager
+  focusedId: string | undefined
+  onFocus: (id: string) => void
+  onPtyReady: (paneId: string, ptyId: PtyId) => void
+}
+
+function LayoutNode(props: LayoutNodeProps) {
 
   return (
     <Show
@@ -997,8 +1146,9 @@ export function LayoutManager(props: LayoutManagerProps) {
         <Pane
           model={props.model}
           ptyManager={props.ptyManager}
-          focused={focusedId() === props.model.id}
-          onFocus={() => handleFocus(props.model.id)}
+          focused={props.focusedId === props.model.id}
+          onFocus={() => props.onFocus(props.model.id)}
+          onPtyReady={props.onPtyReady}
           cols={80}
           rows={24}
         />
@@ -1015,11 +1165,12 @@ export function LayoutManager(props: LayoutManagerProps) {
         >
           <For each={children()}>
             {(child) => (
-              <LayoutManager
+              <LayoutNode
                 model={child}
                 ptyManager={props.ptyManager}
-                focusedId={focusedId()}
-                onFocus={handleFocus}
+                focusedId={props.focusedId}
+                onFocus={props.onFocus}
+                onPtyReady={props.onPtyReady}
               />
             )}
           </For>
@@ -1028,20 +1179,27 @@ export function LayoutManager(props: LayoutManagerProps) {
     </Show>
   )
 }
+
+function firstLeafId(model: PaneModel): string | undefined {
+  if (!model.children?.length) return model.id
+  return firstLeafId(model.children[0])
+}
 ```
+
+`model` と `focusedId` の signal は root の `LayoutManager` だけが保持する。Task 9 の操作 command はこの root state の `setModel` と `setFocusedId` を更新し、子 `LayoutNode` は受け取った props だけで描画する。
 
 `tui.tsx` の `initialPanes` プロパティを `model` に変更する。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
 Run: `bun test tests/layout-manager.test.tsx`
-Expected: PASS。ただし、このテストでは tree 構造の検証のみであり、ペインのフォーカス移動・クローズ・PTY イベント配送の検証は不十分である。Step 3 の実装とともに、以下のテストケースを追加すること:
+Expected: PASS。Step 3 の実装とともに、以下の実レンダリングテストケースを追加すること:
 
-- フォーカス移動: 初期フォーカスが root ではなく、明示的な pane id に設定されること。
-- クローズ: `LayoutManager` が onClose コールバックを発火し、親ツリーから該当ペインが除去されること（コールバック方式は `Pane` 実装時に決定）。
+- フォーカス移動: root の単一 signal で明示的な pane id にフォーカスを設定し、子 `LayoutNode` へ props として伝播すること。
+- クローズ: `LayoutManager` が `closePane` を await した後に親ツリーから該当ペインを除去すること。
 - PTY 接続: `Pane` コンポーネントが `ptyManager.spawn()` して生成した `PtyHandle` を保持し、`onData` イベントを購読して状態更新すること。
 
-これらのテストは Task 9 のフォーカス制御・分割処理と合わせて `tests/layout-manager.test.tsx` / `tests/pane.test.tsx` に追加する。
+これらのテストは Task 9 のフォーカス制御・分割処理と合わせて `tests/layout-manager.test.tsx` / `tests/pane.test.tsx` に追加する。各再帰ノードでローカル signal を初期化してはならない。
 
 Run: `bun test tests/layout-manager.test.tsx`
 Expected: PASS。
@@ -1064,14 +1222,14 @@ git commit -m "feat: 再帰的な横縦分割レイアウトを追加"
 
 **Interfaces:**
 - Consumes: `api.keymap`, `LayoutManager` state
-- Produces: pane split / focus / close commands
+- Produces: pane split / focus / close commands と、close 時の PTY 終了・代替フォーカス選択
 
 - [ ] **Step 1: 失敗するテストを書く**
 
 ```ts
 // tests/keymap.test.ts
 import { describe, expect, test } from "bun:test"
-import { splitPane } from "../src/keymap"
+import { closePane, splitPane } from "../src/keymap"
 
 describe("keymap helpers", () => {
   test("splits a leaf pane horizontally", () => {
@@ -1079,6 +1237,28 @@ describe("keymap helpers", () => {
     const next = splitPane(tree, "root", "horizontal", { command: "bash", args: [] })
     expect(next.children).toHaveLength(2)
     expect(next.direction).toBe("horizontal")
+    expect(next.id).not.toBe("root")
+    expect(next.children?.[0]?.id).toBe("root")
+  })
+
+  test("terminates and removes a leaf, then focuses a remaining pane", async () => {
+    const tree = {
+      id: "split-1",
+      direction: "horizontal" as const,
+      children: [
+        { id: "left", ptyOptions: { command: "bash", args: [] } },
+        { id: "right", ptyOptions: { command: "bash", args: [] } },
+      ],
+    }
+    const terminated: string[] = []
+
+    const result = await closePane(tree, "left", async (leaf) => {
+      terminated.push(leaf.id)
+    })
+
+    expect(terminated).toEqual(["left"])
+    expect(result.root?.id).toBe("right")
+    expect(result.focusedId).toBe("right")
   })
 })
 ```
@@ -1094,7 +1274,7 @@ Expected: FAIL（`src/keymap.ts` 未定義）。
 // src/keymap.ts
 import type { PaneModel, PtyOptions, SplitDirection } from "./types.js"
 
-let paneCounter = 0
+let idCounter = 0
 
 export function splitPane(
   root: PaneModel,
@@ -1102,13 +1282,25 @@ export function splitPane(
   direction: SplitDirection,
   newPtyOptions: PtyOptions,
 ): PaneModel {
-  if (root.id === targetId) {
+  const usedIds = new Set(collectNodes(root).map((node) => node.id))
+  return splitPaneAt(root, targetId, direction, newPtyOptions, usedIds)
+}
+
+function splitPaneAt(
+  root: PaneModel,
+  targetId: string,
+  direction: SplitDirection,
+  newPtyOptions: PtyOptions,
+  usedIds: Set<string>,
+): PaneModel {
+  if (root.id === targetId && !root.children) {
     return {
-      id: root.id,
+      // Internal node には leaf と別の ID を割り当て、既存 leaf の ID を保持する。
+      id: nextUniqueId(usedIds, "split"),
       direction,
       children: [
-        { ...root, id: root.id },
-        { id: `pane-${++paneCounter}`, ptyOptions: newPtyOptions },
+        { id: root.id, ptyOptions: root.ptyOptions },
+        { id: nextUniqueId(usedIds, "pane"), ptyOptions: newPtyOptions },
       ],
     }
   }
@@ -1118,9 +1310,33 @@ export function splitPane(
   return {
     ...root,
     children: root.children.map((child) =>
-      splitPane(child, targetId, direction, newPtyOptions),
+      splitPaneAt(child, targetId, direction, newPtyOptions, usedIds),
     ),
   }
+}
+
+export interface ClosePaneResult {
+  root: PaneModel | undefined
+  focusedId: string | undefined
+}
+
+export async function closePane(
+  root: PaneModel,
+  targetId: string,
+  terminateLeaf: (leaf: PaneModel) => Promise<void>,
+): Promise<ClosePaneResult> {
+  const leaves = collectLeaves(root)
+  const targetIndex = leaves.findIndex((leaf) => leaf.id === targetId)
+  const target = leaves[targetIndex]
+  if (!target) {
+    return { root, focusedId: undefined }
+  }
+
+  await terminateLeaf(target)
+  const nextRoot = removeLeaf(root, targetId)
+  const nextLeaves = nextRoot ? collectLeaves(nextRoot) : []
+  const focusedId = nextLeaves[Math.min(targetIndex, nextLeaves.length - 1)]?.id
+  return { root: nextRoot, focusedId }
 }
 
 export function findPane(root: PaneModel, id: string): PaneModel | undefined {
@@ -1151,9 +1367,33 @@ function collectLeaves(root: PaneModel): PaneModel[] {
   if (!root.children) return [root]
   return root.children.flatMap(collectLeaves)
 }
+
+function removeLeaf(root: PaneModel, targetId: string): PaneModel | undefined {
+  if (!root.children) return root.id === targetId ? undefined : root
+
+  const children = root.children
+    .map((child) => removeLeaf(child, targetId))
+    .filter((child): child is PaneModel => child !== undefined)
+  if (children.length === 0) return undefined
+  if (children.length === 1) return children[0]
+  return { ...root, children }
+}
+
+function collectNodes(root: PaneModel): PaneModel[] {
+  return [root, ...(root.children?.flatMap(collectNodes) ?? [])]
+}
+
+function nextUniqueId(usedIds: Set<string>, prefix: string): string {
+  let id = ""
+  do {
+    id = `${prefix}-${++idCounter}`
+  } while (usedIds.has(id))
+  usedIds.add(id)
+  return id
+}
 ```
 
-`tui.tsx` にペイン操作 command を追加する。
+`tui.tsx` にペイン操作 command を追加する。close command は `closePane()` に、対象 leaf に対応する `PtyManager.terminate()` を await するコールバックを渡す。戻った tree と `focusedId` を root の `LayoutManager` state にまとめて反映し、PTY 終了前に PaneModel を削除しない。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
@@ -1164,7 +1404,7 @@ Expected: PASS。
 
 ```bash
 git add src/keymap.ts tests/keymap.test.ts src/tui.tsx src/layout-manager.tsx
-git commit -m "feat: ペイン分割・フォーカス移動のキーマップを追加"
+git commit -m "feat: ペイン分割・フォーカス・クローズのキーマップを追加"
 ```
 
 ---
@@ -1177,17 +1417,19 @@ git commit -m "feat: ペイン分割・フォーカス移動のキーマップ�
 - Modify: `src/pty-manager.ts`
 
 **Interfaces:**
-- Consumes: OpenTUI `onResize` / box dimensions
+- Consumes: OpenTUI `useTerminalDimensions`
 - Produces: PTY `resize(cols, rows)` calls
 
 - [ ] **Step 1: 失敗するテストを書く**
 
 ```ts
 // tests/pty-manager.test.ts（追記）
-test("resize validates dimensions", () => {
+test("resize validates dimensions", async () => {
   const manager = new PtyManager()
-  const pty = manager.spawn({ command: "bash", args: [], cols: 80, rows: 24 })
+  const shell = process.platform === "win32" ? "cmd.exe" : "bash"
+  const pty = await manager.spawn({ command: shell, args: [], cols: 80, rows: 24 })
   expect(() => pty.resize(0, 0)).not.toThrow()
+  await manager.terminate(pty.id)
 })
 ```
 
@@ -1198,17 +1440,23 @@ Expected: FAIL（`resize` が 0,0 を防いでいない場合は通るが、実�
 
 - [ ] **Step 3: 実装を修正する**
 
-`src/pane.tsx` において、OpenTUI の box サイズ変更を検知して `ptyHandle.resize()` を呼ぶ。Solid / OpenTUI では `onResize` hook または `box` の `layout` イベントを利用する。具体的な API は OpenTUI バージョンに依存するため、実装時に `useTerminalDimensions` または `box` ref 経由で取得する。
+`src/pane.tsx` ではサイズ取得を OpenTUI の `useTerminalDimensions` に統一する。terminal width は `cols`、height は `rows` として整数化し、いずれも正の値のときだけ `ptyHandle.resize(cols, rows)` を呼ぶ。box ref や `onResize` との混在はしない。
 
 簡易実装例:
 
 ```tsx
 // src/pane.tsx に追加
-import { onResize } from "@opentui/solid"
+import { useTerminalDimensions } from "@opentui/solid"
+import { createEffect } from "solid-js"
 
-onResize((width, height) => {
-  if (ptyHandle) {
-    ptyHandle.resize(width, height)
+const terminalDimensions = useTerminalDimensions()
+
+createEffect(() => {
+  const { width, height } = terminalDimensions()
+  const cols = Math.floor(width)
+  const rows = Math.floor(height)
+  if (ptyHandle && cols > 0 && rows > 0) {
+    ptyHandle.resize(cols, rows)
   }
 })
 ```
@@ -1232,6 +1480,7 @@ git commit -m "feat: ペインリサイズをPTYサイズと同期"
 **Files:**
 - Create: `biome.json`
 - Create: `.github/workflows/ci.yml`
+- Commit: `bun.lock`（`bun install` が生成する lockfile）
 
 **Interfaces:**
 - Consumes: プロジェクト全体
@@ -1274,27 +1523,31 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
-      - run: bun install
+          bun-version: "1.1.17"
+      - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run build
       - run: bun test
 ```
 
-- [ ] **Step 3: lint と build を実行して通ることを確認する**
+- [ ] **Step 3: lockfile を含めて lint と build を実行して通ることを確認する**
 
 Run: `bun run lint:fix && bun run build && bun test`
-Expected: すべて PASS。
+Expected: `bun.lock` をコミット対象に含めたうえで、ubuntu-latest / macos-latest / windows-latest の OS matrix すべてで PASS。`node-pty` の native addon が各 OS の Bun で利用できない場合は、Task 3 の動的アダプター選択と診断エラーを検証し、静的 import に戻さない。
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add biome.json .github/workflows/ci.yml
+git add biome.json .github/workflows/ci.yml bun.lock
 git commit -m "chore: Biome設定とCIを追加"
 ```
 
@@ -1321,9 +1574,9 @@ git commit -m "chore: Biome設定とCIを追加"
 - `PtyManager`: `node-pty` プロセスの起動・終了・リサイズ。
 - `LayoutManager`: 再帰的な Flexbox ペインレイアウト。
 - `Pane`: 1 つのペインを表す Solid コンポーネント。
-- `PaneBackend`: Tmux / OpenTUI 実装の抽象。
+- `PaneBackend`: OpenTUI 実装と外部アダプターのための抽象。
 - `OpenTuiPaneBackend`: OpenTUI + PTY 版。
-- `TmuxPaneBackend`: 既存 Tmux 版互換。
+- `TmuxPaneBackend`: Sibyl 本体には含めず、別パッケージまたは外部アダプターで提供する既存 Tmux 版互換。
 
 ## PTY 出力の表示方式ロードマップ
 
@@ -1334,7 +1587,7 @@ git commit -m "chore: Biome設定とCIを追加"
 
 - [ ] **Step 2: README.md に利用方法を追記する**
 
-```markdown
+````markdown
 ## Installation
 
 ```json
@@ -1346,7 +1599,7 @@ git commit -m "chore: Biome設定とCIを追加"
 ## Usage
 
 OpenCode TUI 内で `ctrl+shift+s` または command palette から `sibyl.open` を実行する。
-```
+````
 
 - [ ] **Step 3: Commit**
 
@@ -1370,8 +1623,8 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
 ### Placeholder scan
 
 - 計画内に "TBD", "TODO" は含めていない。
-- `addPaneAt` の初期実装は append のみだが、Task 8 で再帰的 split に置き換える。
-- `onResize` によるサイズ取得は OpenTUI の実 API に依存するため、実装時に `useTerminalDimensions` または box ref を確認して修正する必要あり。これは Task 10 の実装注記として明示している。
+- `addPaneAt` の初期実装は append のみだが、Task 9 で `splitPane` による再帰的 split に置き換える。
+- サイズ取得は Task 10 で `useTerminalDimensions` に統一し、width を cols、height を rows として PTY に同期する。
 
 ### Type consistency
 
@@ -1380,5 +1633,5 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
 
 ### 既知の課題
 
-- `PtyManager` の `emitData` / `emitExit` は複数 handle で最後のコールバックしか有効にならないため、実装時に `Map<PtyId, Set<callback>>` に修正する必要がある。これは Task 3 の注記として記載済み。
+- `PtyManager` の `emitData` / `emitExit` は Task 3 で `Map<PtyId, Set<callback>>` による複数 handle・複数購読者対応を実装する。
 - `node-pty` の Bun 互換性は CI（Task 11）で検証する。
