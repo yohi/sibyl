@@ -2,6 +2,7 @@ import type { IPty } from "node-pty"
 import type { PtyOptions } from "./types.js"
 
 export type PtyId = string
+type PtyModule = Pick<typeof import("node-pty"), "spawn">
 
 export interface PtyHandle {
   id: PtyId
@@ -22,11 +23,11 @@ export class PtyManager {
   >()
   private exited = new Set<PtyId>()
   private idCounter = 0
-  private nodePtyModule?: Promise<typeof import("node-pty")>
+  private nodePtyModule?: Promise<PtyModule>
 
   constructor(
-    private readonly loadBunPtyAdapter?: () => Promise<typeof import("node-pty")>,
-    private readonly loadNodePty = () => import("node-pty"),
+    private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
+    private readonly loadNodePty: () => Promise<PtyModule> = () => import("node-pty"),
   ) {}
 
   async spawn(options: PtyOptions): Promise<PtyHandle> {
@@ -228,7 +229,7 @@ export class PtyManager {
     this.exited.delete(id)
   }
 
-  private async loadPtyModule(): Promise<typeof import("node-pty")> {
+  private async loadPtyModule(): Promise<PtyModule> {
     if (typeof process.versions.bun === "string" && this.loadBunPtyAdapter) {
       return this.loadBunPtyAdapter()
     }
