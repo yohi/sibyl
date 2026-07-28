@@ -10,7 +10,7 @@ const initialRoot = {
     {
       id: "pane-1",
       ptyOptions: {
-        command: process.env.SHELL ?? "sh",
+        command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
         args: [],
       },
     },
@@ -26,7 +26,19 @@ const tui: TuiPlugin = async (api) => {
       render: () => <LayoutManager ptyManager={ptyManager} initialPanes={initialRoot.children} />,
     },
   ])
-  api.keymap.registerLayer({})
+  api.keymap.registerLayer({
+    commands: [
+      {
+        name: "sibyl.open",
+        title: "Open Sibyl",
+        category: "Plugin",
+        namespace: "palette",
+        slashName: "sibyl",
+        run: () => api.route.navigate("sibyl"),
+      },
+    ],
+    bindings: [{ key: "ctrl+shift+s", cmd: "sibyl.open" }],
+  })
   api.lifecycle.onDispose(() => ptyManager.terminateAll())
 }
 
