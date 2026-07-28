@@ -121,7 +121,7 @@
     "rootDir": "./src",
     "types": ["bun"]
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "tests/**/*.ts", "tests/**/*.tsx"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
 ```
 
@@ -271,7 +271,7 @@ describe("PtyManager", () => {
   test("spawns a shell and receives data", async () => {
     const manager = new PtyManager()
     const shell = process.platform === "win32" ? "cmd.exe" : "bash"
-    const pty = manager.spawn(shell, [], { cols: 80, rows: 24 })
+    const pty = manager.spawn({ command: shell, args: [], cols: 80, rows: 24 })
 
     const dataPromise = new Promise<string>((resolve) => {
       pty.onData((data) => {
@@ -453,8 +453,9 @@ export class PtyManager {
   }
 }
 ```
-
 注: 上記 `emitData` / `emitExit` は各 handle 作成時に上書きされるため、複数 handle では最後のものだけ有効になる。これは設計上のバグであるため、実装時に `Map<PtyId, Set<callback>>` 方式に修正すること。
+
+**Task 3 完成時の条件:** `PtyManager` は単一 PTY の spawn / write / resize / terminate / イベント購読を実装する。複数 PTY を同時に動作させるには Task 8 以降で `Pane` コンポーネントが `PtyManager` と接続する際、コールバックを handle ごとに独立して管理する必要がある。実装では `Map<PtyId, Set<(data: string) => void>>` と `Map<PtyId, Set<(event) => void>>` を使い、同じ PTY ハンドルに複数の購読者がいても、また異なる PTY ハンドルが同時に存在しても、それぞれのコールバックが正しく呼ばれるように修正すること。Task 8 では `tests/layout-manager.test.tsx` に 2 ペイン同時起動・出力受信・終了通知のテストケースを追加し、複数 PTY のイベント配送が壊れていないことを検証する。
 
 - [ ] **Step 4: テストが通ることを確認する**
 
@@ -1034,6 +1035,15 @@ export function LayoutManager(props: LayoutManagerProps) {
 - [ ] **Step 4: テストが通ることを確認する**
 
 Run: `bun test tests/layout-manager.test.tsx`
+Expected: PASS。ただし、このテストでは tree 構造の検証のみであり、ペインのフォーカス移動・クローズ・PTY イベント配送の検証は不十分である。Step 3 の実装とともに、以下のテストケースを追加すること:
+
+- フォーカス移動: 初期フォーカスが root ではなく、明示的な pane id に設定されること。
+- クローズ: `LayoutManager` が onClose コールバックを発火し、親ツリーから該当ペインが除去されること（コールバック方式は `Pane` 実装時に決定）。
+- PTY 接続: `Pane` コンポーネントが `ptyManager.spawn()` して生成した `PtyHandle` を保持し、`onData` イベントを購読して状態更新すること。
+
+これらのテストは Task 9 のフォーカス制御・分割処理と合わせて `tests/layout-manager.test.tsx` / `tests/pane.test.tsx` に追加する。
+
+Run: `bun test tests/layout-manager.test.tsx`
 Expected: PASS。
 
 - [ ] **Step 5: Commit**
@@ -1329,7 +1339,7 @@ git commit -m "chore: Biome設定とCIを追加"
 
 ```json
 {
-  "plugin": ["@oh-my-opencode/sibyl"]
+  "plugin": ["@yohi/sibyl"]
 }
 ```
 
