@@ -410,8 +410,17 @@ export class PtyManager {
 
     this.terminals.set(id, terminal)
 
+    // 新しい購読者が登録される前に発生したデータ/終了イベントを
+    // 保持するため、コールバック集合に加えてバッファで蓄積する。
+    // Pane コンポーネントは spawn() 解決後に onData/onExit を登録する
+    // 可能性があるため、バッファをリプレイしないと起動直後の出力や
+    // 即時終了が見逃される。
+    const pendingData: string[] = []
+    let pendingExit: { exitCode: number; signal?: number } | undefined
+
     const dataSub = terminal.onData((data) => {
       if (!this.exited.has(id)) {
+        pendingData.push(data)
         this.emitData(id, data)
       }
     })
@@ -419,11 +428,14 @@ export class PtyManager {
 
     const exitSub = terminal.onExit((event) => {
       this.exited.add(id)
+      pendingExit = event
       this.emitExit(id, event)
     })
     this.exitSubscriptions.set(id, exitSub)
 
-    return this.createHandle(id, terminal)
+    // 購読登録時にバッファをリプレイしてから通常の購読フローを開始する。
+    const handle = this.createHandle(id, terminal)
+    return this.withReplay(id, handle, pendingData, pendingExit)
   }
 
   async terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
@@ -527,6 +539,33 @@ export class PtyManager {
             this.exitCallbacks.delete(id)
           }
         }
+      },
+    }
+  }
+
+  private withReplay(
+    id: PtyId,
+    handle: PtyHandle,
+    pendingData: string[],
+    pendingExit: { exitCode: number; signal?: number } | undefined,
+  ): PtyHandle {
+    const originalOnData = handle.onData.bind(handle)
+    const originalOnExit = handle.onExit.bind(handle)
+    return {
+      ...handle,
+      onData: (callback) => {
+        if (this.dataCallbacks.get(id)?.has(callback)) {
+          return originalOnData(callback)
+        }
+        for (const data of pendingData) callback(data)
+        return originalOnData(callback)
+      },
+      onExit: (callback) => {
+        if (this.exitCallbacks.get(id)?.has(callback)) {
+          return originalOnExit(callback)
+        }
+        if (pendingExit) callback(pendingExit)
+        return originalOnExit(callback)
       },
     }
   }
@@ -917,16 +956,20 @@ const tui: TuiPlugin = async (api) => {
       render: () => (
         <LayoutManager
           ptyManager={ptyManager}
-          initialPanes={[
-            backend.create({
-              command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
-              args: [],
-              cols: 80,
-              rows: 24,
-            }),
-          ]}
+          model={{
+            id: "root",
+            direction: "horizontal",
+            children: [
+              backend.create({
+                command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
+                args: [],
+                cols: 80,
+                rows: 24,
+              }),
+            ],
+          }}
         />
-    },
+      ),
   ])
 
   api.keymap.registerLayer({
@@ -1066,8 +1109,120 @@ git commit -m "feat: Server pluginエントリを追加"
 
 - [ ] **Step 1: 失敗するテストを書く**
 
+まず、OpenTUI の test renderer を使う helper を `tests/opentui-test-helper.ts` に追加する。
+
+```ts
+// tests/opentui-test-helper.ts
+import type { Component } from "solid-js"
+import { render } from "@opentui/solid/test"
+
+export function renderOpenTui(component: Component) {
+  return render(component)
+}
+```
+
+次に、Pane コンポーネントや LayoutManager を単体テストするための `PtyManager` 互換の fake を `tests/fake-pty-manager.ts` に追加する。
+
+```ts
+// tests/fake-pty-manager.ts
+import type { PtyHandle, PtyId, PtyManager } from "../src/pty-manager"
+
+export class FakePtyManager implements PtyManager {
+  private ptys = new Map<PtyId, { terminal: FakeTerminal; exited: boolean }>()
+  private idCounter = 0
+
+  async spawn(options: { command: string; args: string[] }) {
+    const id = `pty-${++this.idCounter}` as PtyId
+    const terminal = new FakeTerminal(options)
+    this.ptys.set(id, { terminal, exited: false })
+
+    const handle: PtyHandle = {
+      id,
+      write: (data) => terminal.write(data),
+      resize: () => {},
+      onData: (callback) => {
+        terminal.onData(callback)
+        return () => terminal.offData(callback)
+      },
+      onExit: (callback) => {
+        terminal.onExit(callback)
+        return () => terminal.offExit(callback)
+      },
+    }
+    return handle
+  }
+
+  async terminate(id: PtyId) {
+    const entry = this.ptys.get(id)
+    if (!entry) return
+    entry.exited = true
+    entry.terminal.exit(0)
+  }
+
+  terminateAll(): Promise<void> {
+    return Promise.all(Array.from(this.ptys.keys()).map((id) => this.terminate(id))).then(
+      () => undefined,
+    )
+  }
+}
+
+class FakeTerminal {
+  private dataCallbacks = new Set<(data: string) => void>()
+  private exitCallbacks = new Set<(event: { exitCode: number }) => void>()
+  private _exited = false
+
+  constructor(private options: { command: string; args: string[] }) {}
+
+  write(data: string) {
+    if (this._exited) return
+    if (data.trim() === "exit") {
+      this.exit(0)
+      return
+    }
+    this.emitData(`${this.options.command} says: ${data}`)
+  }
+
+  exit(code: number) {
+    if (this._exited) return
+    this._exited = true
+    for (const callback of this.exitCallbacks) {
+      callback({ exitCode: code })
+    }
+  }
+
+  onData(callback: (data: string) => void) {
+    this.dataCallbacks.add(callback)
+  }
+
+  offData(callback: (data: string) => void) {
+    this.dataCallbacks.delete(callback)
+  }
+
+  onExit(callback: (event: { exitCode: number }) => void) {
+    this.exitCallbacks.add(callback)
+  }
+
+  offExit(callback: (event: { exitCode: number }) => void) {
+    this.exitCallbacks.delete(callback)
+  }
+
+  private emitData(data: string) {
+    for (const callback of this.dataCallbacks) {
+      callback(data)
+    }
+  }
+}
+```
+
+上記を import して `tests/layout-manager.test.tsx` に追記する。
+
 ```tsx
 // tests/layout-manager.test.tsx（追記）
+import { renderOpenTui } from "./opentui-test-helper"
+import { FakePtyManager } from "./fake-pty-manager"
+
+const fakePtyManager = new FakePtyManager()
+
 test("nested panes render as horizontal children and route focus", () => {
   const tree: PaneModel = {
     id: "root",
