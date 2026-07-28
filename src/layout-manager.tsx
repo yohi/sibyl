@@ -134,10 +134,16 @@ function removeNode(model: PaneModel, paneId: string): PaneModel | undefined {
     return model.id === paneId ? undefined : model
   }
 
-  const nextChildren: PaneModel[] = []
-  for (const child of children) {
+  let nextChildren: PaneModel[] | undefined
+  for (const [index, child] of children.entries()) {
     const nextChild = removeNode(child, paneId)
+    if (nextChild === child) {
+      if (nextChildren !== undefined) nextChildren.push(child)
+      continue
+    }
+
+    nextChildren ??= children.slice(0, index)
     if (nextChild !== undefined) nextChildren.push(nextChild)
   }
-  return { ...model, children: nextChildren }
+  return nextChildren === undefined ? model : { ...model, children: nextChildren }
 }

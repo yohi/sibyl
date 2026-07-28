@@ -185,6 +185,42 @@ describe("LayoutManager", () => {
     expect(layout.focusedId()).toBe("pane-a")
   })
 
+  test("preserves an untouched branch without duplicating its PTYs when a sibling pane closes", async () => {
+    const { createLayoutManagerController } = await import("../src/layout-manager")
+    const model = {
+      id: "root",
+      direction: "horizontal",
+      children: [
+        {
+          id: "left-split",
+          direction: "vertical",
+          children: [
+            { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+            { id: "pane-b", ptyOptions: { command: "fake-shell", args: [] } },
+          ],
+        },
+        { id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } },
+      ],
+    } satisfies PaneModel
+    const untouchedBranch = model.children[0]
+    const ptyManager = new FakePtyManager()
+    const layout = createLayoutManagerController(ptyManager, model)
+    const paneAPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
+    const paneBPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
+    const paneCPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
+
+    await layout.onPtyReady("pane-a", paneAPty.id)
+    await layout.onPtyReady("pane-b", paneBPty.id)
+    await layout.onPtyReady("pane-c", paneCPty.id)
+    const initialSpawnCount = ptyManager.spawnedOptions.length
+
+    await layout.closePane("pane-c")
+
+    expect(ptyManager.terminatedIds).toEqual([paneCPty.id])
+    expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount)
+    expect(layout.model().children?.[0]).toBe(untouchedBranch)
+  })
+
   test("terminates a PTY that finishes spawning after its pane closes", async () => {
     lifecycle.cleanup = undefined
     const { createLayoutManagerController } = await import("../src/layout-manager")
