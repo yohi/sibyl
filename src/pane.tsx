@@ -7,10 +7,10 @@ import type { PaneModel } from "./types.js"
 
 export interface PaneProps {
   model: PaneModel
-  ptyManager: PtyManager
+  ptyManager: Pick<PtyManager, "spawn">
   focused: boolean
   onFocus: () => void
-  onPtyReady: (paneId: string, ptyId: PtyId) => void
+  onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>
   cols: number
   rows: number
 }
@@ -42,10 +42,10 @@ export function Pane(props: PaneProps) {
     if (!props.model.ptyOptions) return
     void props.ptyManager
       .spawn(props.model.ptyOptions)
-      .then((handle) => {
+      .then(async (handle) => {
+        await props.onPtyReady(props.model.id, handle.id)
         if (disposed) return
         ptyHandle = handle
-        props.onPtyReady(props.model.id, handle.id)
         removeDataListener = handle.onData(appendOutput)
         removeExitListener = handle.onExit(() => {
           removeDataListener()
@@ -53,6 +53,7 @@ export function Pane(props: PaneProps) {
         })
       })
       .catch((error: unknown) => {
+        if (disposed) return
         const message = error instanceof Error ? error.message : String(error)
         appendOutput(`PTY start failed: ${message}\n`)
       })
