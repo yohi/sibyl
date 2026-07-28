@@ -102,6 +102,7 @@
     "node-pty": "^1.1.0"
   },
   "devDependencies": {
+    "@babel/preset-typescript": "^7.26.0",
     "@biomejs/biome": "^1.9.4",
     "@rollup/plugin-babel": "^6.0.4",
     "@rollup/plugin-node-resolve": "^15.3.0",
@@ -551,20 +552,28 @@ export class PtyManager {
   ): PtyHandle {
     const originalOnData = handle.onData.bind(handle)
     const originalOnExit = handle.onExit.bind(handle)
+    let dataReplayed = false
+    let exitReplayed = false
     return {
       ...handle,
       onData: (callback) => {
         if (this.dataCallbacks.get(id)?.has(callback)) {
           return originalOnData(callback)
         }
-        for (const data of pendingData) callback(data)
+        if (!dataReplayed) {
+          dataReplayed = true
+          for (const data of pendingData) callback(data)
+        }
         return originalOnData(callback)
       },
       onExit: (callback) => {
         if (this.exitCallbacks.get(id)?.has(callback)) {
           return originalOnExit(callback)
         }
-        if (pendingExit) callback(pendingExit)
+        if (!exitReplayed) {
+          exitReplayed = true
+          if (pendingExit) callback(pendingExit)
+        }
         return originalOnExit(callback)
       },
     }
