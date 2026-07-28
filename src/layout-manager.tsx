@@ -1,5 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createSignal, For } from "solid-js"
+import type { Accessor } from "solid-js"
 import { Pane } from "./pane.js"
 import type { PtyId, PtyManager } from "./pty-manager.js"
 import type { PaneModel } from "./types.js"
@@ -54,7 +55,7 @@ export function LayoutManager(props: LayoutManagerProps) {
 
   return (
     <LayoutNode
-      model={model()}
+      model={model}
       ptyManager={props.ptyManager}
       focusedId={focusedId}
       onFocus={focusPane}
@@ -65,7 +66,7 @@ export function LayoutManager(props: LayoutManagerProps) {
 }
 
 export interface LayoutNodeProps {
-  readonly model: PaneModel
+  readonly model: Accessor<PaneModel>
   readonly ptyManager: LayoutPtyManager
   readonly focusedId: () => string | undefined
   readonly onFocus: (paneId: string) => void
@@ -74,19 +75,19 @@ export interface LayoutNodeProps {
 }
 
 export function LayoutNode(props: LayoutNodeProps) {
-  const children = props.model.children
+  const children = props.model().children
   if (children !== undefined) {
     return (
       <box
-        flexDirection={props.model.direction === "vertical" ? "column" : "row"}
+        flexDirection={props.model().direction === "vertical" ? "column" : "row"}
         flexGrow={1}
         width={props.isRoot ? "100%" : undefined}
         height={props.isRoot ? "100%" : undefined}
       >
-        <For each={children}>
+        <For each={props.model().children}>
           {(child) => (
             <LayoutNode
-              model={child}
+              model={() => child}
               ptyManager={props.ptyManager}
               focusedId={props.focusedId}
               onFocus={props.onFocus}
@@ -100,10 +101,10 @@ export function LayoutNode(props: LayoutNodeProps) {
 
   return (
     <Pane
-      model={props.model}
+      model={props.model()}
       ptyManager={props.ptyManager}
-      focused={props.focusedId() === props.model.id}
-      onFocus={() => props.onFocus(props.model.id)}
+      focused={props.focusedId() === props.model().id}
+      onFocus={() => props.onFocus(props.model().id)}
       onPtyReady={props.onPtyReady}
       cols={80}
       rows={24}

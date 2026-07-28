@@ -76,6 +76,10 @@ function getOnlyRenderedNode(): RenderedNode {
   return node
 }
 
+function collectPaneIds(model: PaneModel): string[] {
+  return [model.id, ...(model.children?.flatMap(collectPaneIds) ?? [])]
+}
+
 function createDeferred<T>() {
   let resolvePromise: ((value: T) => void) | undefined
   const promise = new Promise<T>((resolve) => {
@@ -97,11 +101,13 @@ describe("LayoutManager", () => {
     const { LayoutManager, LayoutNode } = await import("../src/layout-manager")
     const ptyManager = new FakePtyManager()
 
-    const rendered = LayoutManager({ model: nestedModel, ptyManager })
+    LayoutManager({ model: nestedModel, ptyManager })
 
-    expect(rendered).toEqual(getOnlyRenderedNode())
     expect(getOnlyRenderedNode().type).toBe(LayoutNode)
-    expect(getOnlyRenderedNode().props.model).toBe(nestedModel)
+    const renderedModel = getOnlyRenderedNode().props.model
+    expect(typeof renderedModel).toBe("function")
+    if (typeof renderedModel !== "function") throw new Error("Layout model accessor is missing")
+    expect(renderedModel()).toBe(nestedModel)
     expect(getOnlyRenderedNode().props.ptyManager).toBe(ptyManager)
   })
 
@@ -116,16 +122,36 @@ describe("LayoutManager", () => {
     }
 
     renderedNodes.length = 0
-    LayoutNode({ ...nodeProps, model: nestedModel })
+    LayoutNode({ ...nodeProps, model: () => nestedModel })
     expect(getOnlyRenderedNode().type).toBe("box")
     expect(getOnlyRenderedNode().props.flexDirection).toBe("row")
 
     renderedNodes.length = 0
     const verticalModel = nestedModel.children?.[1]
     if (!verticalModel) throw new Error("Vertical split test fixture is incomplete")
-    LayoutNode({ ...nodeProps, model: verticalModel })
+    LayoutNode({ ...nodeProps, model: () => verticalModel })
     expect(getOnlyRenderedNode().type).toBe("box")
     expect(getOnlyRenderedNode().props.flexDirection).toBe("column")
+  })
+
+  test("renders from a reactive model accessor that excludes a closed pane", async () => {
+    renderedNodes.length = 0
+    const { LayoutNode, createLayoutManagerController } = await import("../src/layout-manager")
+    const ptyManager = new FakePtyManager()
+    const layout = createLayoutManagerController(ptyManager, nestedModel)
+
+    LayoutNode({
+      model: layout.model,
+      ptyManager,
+      focusedId: layout.focusedId,
+      onFocus: layout.focusPane,
+      onPtyReady: layout.onPtyReady,
+    })
+    expect(getOnlyRenderedNode().type).toBe("box")
+
+    await layout.closePane("pane-b")
+
+    expect(collectPaneIds(layout.model())).not.toContain("pane-b")
   })
 
   test("returns the leftmost leaf id from a nested model", async () => {
