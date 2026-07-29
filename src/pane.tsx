@@ -20,7 +20,7 @@ export function Pane(props: PaneProps) {
   const MAX_OUTPUT_LINES = 1000;
   const [output, setOutput] = createSignal("");
   const terminalDimensions = useTerminalDimensions();
-  let ptyHandle: PtyHandle | undefined;
+  const [ptyHandle, setPtyHandle] = createSignal<PtyHandle>();
   let disposed = false;
   let pendingOsc = "";
   let removeDataListener = () => {};
@@ -30,8 +30,9 @@ export function Pane(props: PaneProps) {
     const { width, height } = terminalDimensions();
     const cols = Math.floor(width);
     const rows = Math.floor(height);
-    if (ptyHandle !== undefined && cols > 0 && rows > 0) {
-      ptyHandle.resize(cols, rows);
+    const handle = ptyHandle();
+    if (handle !== undefined && cols > 0 && rows > 0) {
+      handle.resize(cols, rows);
     }
   });
 
@@ -59,7 +60,7 @@ export function Pane(props: PaneProps) {
           props.onPtyCleanup?.(handle.id);
           return;
         }
-        ptyHandle = handle;
+        setPtyHandle(handle);
         removeDataListener = handle.onData(appendOutput);
         removeExitListener = handle.onExit(() => {
           removeDataListener();
@@ -77,12 +78,14 @@ export function Pane(props: PaneProps) {
     disposed = true;
     removeDataListener();
     removeExitListener();
-    if (ptyHandle !== undefined) props.onPtyCleanup?.(ptyHandle.id);
+    const handle = ptyHandle();
+    if (handle !== undefined) props.onPtyCleanup?.(handle.id);
   });
 
   useKeyboard((event) => {
-    if (!props.focused || !ptyHandle) return;
-    ptyHandle.write(event.sequence ?? event.raw ?? event.name);
+    const handle = ptyHandle();
+    if (!props.focused || !handle) return;
+    handle.write(event.sequence ?? event.raw ?? event.name);
   });
 
   return (
