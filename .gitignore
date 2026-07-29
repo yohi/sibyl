@@ -5,3 +5,5 @@ dist/
 .env
 .worktrees/
 .superpowers/sdd/
+.omo/
+.nexus/
