@@ -411,4 +411,70 @@ describe("LayoutManager", () => {
     finishTermination.resolve()
     await settlePromises()
   })
+
+  test("keeps the surviving split pane PTY active when cleanup follows a shrink", async () => {
+    lifecycle.cleanup = undefined
+    renderedNodes.length = 0
+    const { LayoutManager, createLayoutManagerController } = await import("../src/layout-manager")
+    const { Pane } = await import("../src/pane")
+    const model = {
+      id: "root",
+      direction: "horizontal",
+      children: [
+        { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+        { id: "pane-b", ptyOptions: { command: "fake-shell", args: [] } },
+      ],
+    } satisfies PaneModel
+    const closingPane = model.children[0]
+    const survivingPane = model.children[1]
+    if (!closingPane || !survivingPane) throw new Error("Split pane test fixture is incomplete")
+
+    const ptyManager = new FakePtyManager()
+    const layout = createLayoutManagerController(ptyManager, model)
+
+    LayoutManager({ controller: layout, ptyManager })
+    const onPtyCleanup = getOnlyRenderedNode().props.onPtyCleanup
+    if (typeof onPtyCleanup !== "function") {
+      throw new Error("LayoutManager PTY cleanup callback is missing")
+    }
+
+    Pane({
+      model: closingPane,
+      ptyManager,
+      focused: true,
+      onFocus: () => {},
+      onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => onPtyCleanup(closingPane.id, ptyId),
+      cols: 80,
+      rows: 24,
+    })
+    await settlePromises()
+    const closingPaneCleanup = getCleanup()
+    if (!closingPaneCleanup) throw new Error("Closing Pane cleanup was not registered")
+
+    Pane({
+      model: survivingPane,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => onPtyCleanup(survivingPane.id, ptyId),
+      cols: 80,
+      rows: 24,
+    })
+    await settlePromises()
+    const survivingPaneCleanup = getCleanup()
+    if (!survivingPaneCleanup) throw new Error("Surviving Pane cleanup was not registered")
+
+    const [closingPtyId, survivingPtyId] = ptyManager.writes.keys()
+    if (!closingPtyId || !survivingPtyId) throw new Error("Split pane PTYs were not spawned")
+
+    await layout.closePane(closingPane.id)
+    closingPaneCleanup()
+    survivingPaneCleanup()
+
+    expect(ptyManager.terminatedIds).toEqual([closingPtyId])
+    expect(ptyManager.terminatedIds).not.toContain(survivingPtyId)
+    expect(ptyManager.spawnedOptions).toHaveLength(2)
+  })
 })

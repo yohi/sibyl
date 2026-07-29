@@ -91,6 +91,10 @@ export function createLayoutManagerController(
 
 export function LayoutManager(props: LayoutManagerProps) {
   const { model, focusedId, onPtyReady, focusPane } = props.controller
+  const onPtyCleanup = (paneId: PaneId, ptyId: PtyId) => {
+    if (findPane(model(), paneId) !== undefined) return
+    void props.ptyManager.terminate(ptyId)
+  }
 
   return (
     <LayoutNode
@@ -99,7 +103,7 @@ export function LayoutManager(props: LayoutManagerProps) {
       focusedId={focusedId}
       onFocus={focusPane}
       onPtyReady={onPtyReady}
-      onPtyCleanup={(ptyId) => props.ptyManager.terminate(ptyId)}
+      onPtyCleanup={onPtyCleanup}
       isRoot={true}
     />
   )
@@ -111,7 +115,7 @@ export interface LayoutNodeProps {
   readonly focusedId: () => string | undefined
   readonly onFocus: (paneId: string) => void
   readonly onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>
-  readonly onPtyCleanup: (ptyId: PtyId) => void
+  readonly onPtyCleanup: (paneId: PaneId, ptyId: PtyId) => void
   readonly isRoot?: boolean
 }
 
@@ -126,7 +130,7 @@ export function LayoutNode(props: LayoutNodeProps) {
           focused={props.focusedId() === props.model().id}
           onFocus={() => props.onFocus(props.model().id)}
           onPtyReady={props.onPtyReady}
-          onPtyCleanup={props.onPtyCleanup}
+          onPtyCleanup={(ptyId) => props.onPtyCleanup(props.model().id, ptyId)}
           cols={80}
           rows={24}
         />
