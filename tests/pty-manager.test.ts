@@ -65,6 +65,16 @@ class FakePty implements IPty {
 }
 
 describe("PtyManager", () => {
+  test("resize validates dimensions", async () => {
+    const manager = new PtyManager()
+    const shell = process.platform === "win32" ? "cmd.exe" : "bash"
+    const pty = await manager.spawn({ command: shell, args: [], cols: 80, rows: 24 })
+
+    expect(() => pty.resize(0, 0)).not.toThrow()
+
+    await manager.terminate(pty.id)
+  })
+
   test("uses an injected node-pty adapter to manage PTY input and output", async () => {
     const fakePty = new FakePty()
     const fakeNodePty = {

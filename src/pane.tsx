@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
-import { useKeyboard } from "@opentui/solid"
-import { createSignal, onCleanup, onMount } from "solid-js"
+import { useKeyboard, useTerminalDimensions } from "@opentui/solid"
+import { createEffect, createSignal, onCleanup, onMount } from "solid-js"
 import { stripAnsi } from "./ansi-strip.js"
 import type { PtyHandle, PtyId, PtyManager } from "./pty-manager.js"
 import type { PaneModel } from "./types.js"
@@ -19,11 +19,21 @@ export interface PaneProps {
 export function Pane(props: PaneProps) {
   const MAX_OUTPUT_LINES = 1000
   const [output, setOutput] = createSignal("")
+  const terminalDimensions = useTerminalDimensions()
   let ptyHandle: PtyHandle | undefined
   let disposed = false
   let pendingOsc = ""
   let removeDataListener = () => {}
   let removeExitListener = () => {}
+
+  createEffect(() => {
+    const { width, height } = terminalDimensions()
+    const cols = Math.floor(width)
+    const rows = Math.floor(height)
+    if (ptyHandle !== undefined && cols > 0 && rows > 0) {
+      ptyHandle.resize(cols, rows)
+    }
+  })
 
   const appendOutput = (data: string) => {
     const raw = pendingOsc + data
