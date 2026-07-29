@@ -108,7 +108,7 @@ export function removeLeaf(root: PaneModel, targetId: string): PaneModel | undef
   }
   if (nextChildren === undefined) return root
   if (nextChildren.length === 0) return undefined
-  if (nextChildren.length === 1) return nextChildren[0]
+  if (nextChildren.length === 1) return { ...root, children: [nextChildren[0]] }
   return { ...root, children: nextChildren }
 }
 

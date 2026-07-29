@@ -218,7 +218,11 @@ describe("LayoutManager", () => {
       direction: "horizontal",
       children: [
         { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-        { id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } },
+        {
+          id: "right-split",
+          direction: "vertical",
+          children: [{ id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } }],
+        },
       ],
     })
     expect(layout.focusedId()).toBe("pane-c")
@@ -257,7 +261,12 @@ describe("LayoutManager", () => {
 
     expect(ptyManager.terminatedIds).toEqual([])
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount)
-    expect(layout.model()).toBe(untouchedBranch)
+    expect(layout.model()).toEqual({
+      id: "root",
+      direction: "horizontal",
+      children: [untouchedBranch],
+    })
+    expect(layout.model().children?.[0]).toBe(untouchedBranch)
   })
 
   test("terminates the original PTY when it resolves after its pane unmounts during a split", async () => {
@@ -402,7 +411,7 @@ describe("LayoutManager", () => {
     const closing = layout.closePane("pane-a")
 
     // Then
-    expect(collectPaneIds(layout.model())).toEqual([siblingModel.id])
+    expect(collectPaneIds(layout.model())).toEqual([layout.model().id, siblingModel.id])
     expect(layout.focusedId()).toBe(siblingModel.id)
     replacementPaneCleanup()
     await closing
@@ -476,5 +485,74 @@ describe("LayoutManager", () => {
     expect(ptyManager.terminatedIds).toEqual([closingPtyId])
     expect(ptyManager.terminatedIds).not.toContain(survivingPtyId)
     expect(ptyManager.spawnedOptions).toHaveLength(2)
+  })
+
+  test("does not respawn the surviving pane PTY when closing a sibling", async () => {
+    renderedNodes.length = 0
+    const { LayoutNode, createLayoutManagerController } = await import("../src/layout-manager")
+    const { Pane } = await import("../src/pane")
+    const model = {
+      id: "root",
+      direction: "horizontal",
+      children: [
+        { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+        { id: "pane-b", ptyOptions: { command: "fake-shell", args: [] } },
+      ],
+    } satisfies PaneModel
+    const closingPane = model.children[0]
+    const survivingPane = model.children[1]
+    if (!closingPane || !survivingPane) throw new Error("Split pane test fixture is incomplete")
+
+    const ptyManager = new FakePtyManager()
+    const layout = createLayoutManagerController(ptyManager, model)
+    const ptyIds = new Map<string, string>()
+    const onPtyReady = async (paneId: string, ptyId: string) => {
+      ptyIds.set(paneId, ptyId)
+    }
+    const nodeProps = {
+      model: layout.model,
+      ptyManager,
+      focusedId: layout.focusedId,
+      onFocus: layout.focusPane,
+      onPtyReady,
+      onPtyCleanup: (_paneId: string, ptyId: string) => ptyManager.terminate(ptyId),
+    }
+
+    LayoutNode(nodeProps)
+    expect(getOnlyRenderedNode().type).toBe("box")
+
+    Pane({
+      model: survivingPane,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      cols: 80,
+      rows: 24,
+    })
+    await settlePromises()
+    const originalPtyId = ptyIds.get(survivingPane.id)
+    if (!originalPtyId) throw new Error("Surviving pane PTY was not spawned")
+
+    await layout.closePane(closingPane.id)
+
+    renderedNodes.length = 0
+    LayoutNode(nodeProps)
+    if (getOnlyRenderedNode().type === Pane) {
+      Pane({
+        model: survivingPane,
+        ptyManager,
+        focused: true,
+        onFocus: () => {},
+        onPtyReady,
+        onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+        cols: 80,
+        rows: 24,
+      })
+      await settlePromises()
+    }
+
+    expect(ptyIds.get(survivingPane.id)).toBe(originalPtyId)
   })
 })
