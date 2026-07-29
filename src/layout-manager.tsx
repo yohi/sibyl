@@ -142,7 +142,7 @@ export function LayoutNode(props: LayoutNodeProps) {
           focused={props.focusedId() === props.model().id}
           onFocus={() => props.onFocus(props.model().id)}
           onPtyReady={props.onPtyReady}
-          onPtyCleanup={(ptyId) => props.onPtyCleanup(props.model().id, ptyId)}
+          onPtyCleanup={(_paneId, ptyId) => props.onPtyCleanup(props.model().id, ptyId)}
           cols={80}
           rows={24}
         />

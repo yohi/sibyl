@@ -57,6 +57,7 @@ class BunPty implements IPty {
           for (const listener of this.exitListeners) {
             listener({ exitCode, signal: undefined });
           }
+          this.subprocess.terminal?.close();
         },
       },
     });

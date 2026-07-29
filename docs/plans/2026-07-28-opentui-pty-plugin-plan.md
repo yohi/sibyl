@@ -13,7 +13,7 @@
 - `package.json` は `"type": "module"` とし、ルート import 用の `exports["."]` と `exports["./server"]` / `exports["./tui"]` を提供する。
 - OpenCode engine: `^1.18.8` 以上。
 - OpenTUI peer dependencies: `@opentui/core`, `@opentui/solid`, `@opentui/keymap` はすべて `>=0.4.5 <1` とする。
-- CI の Bun ランタイムは `1.1.39` に固定する（text-format `bun.lock` に対応するため）。`@types/bun` は `1.3.14` に固定し、Bun.Terminal 型を利用可能にする。
+- CI の Bun ランタイムは `1.3.14` に固定する（Bun.Terminal PTY 対応のため）。`@types/bun` も `1.3.14` に固定し、lockfile と合わせて再現可能なビルドにする。
 - 絶対パスは使用しない。環境変数または相対パスで解決する。
 - 型安全: `as any`, `@ts-ignore`, `@ts-expect-error` は禁止。
 - エラーハンドリング: 空の catch ブロックは禁止。
