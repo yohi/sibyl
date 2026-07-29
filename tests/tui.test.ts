@@ -44,7 +44,16 @@ describe("TUI plugin", () => {
 
     expect(routes.map((route) => route.name)).toContain("sibyl")
     expect(layers).toHaveLength(1)
-    expect(layers[0]?.commands?.map((command) => command.name)).toContain("sibyl.open")
+    expect(layers[0]?.commands?.map((command) => command.name)).toEqual(
+      expect.arrayContaining([
+        "sibyl.open",
+        "sibyl.split.horizontal",
+        "sibyl.split.vertical",
+        "sibyl.focus.next",
+        "sibyl.focus.prev",
+        "sibyl.close",
+      ]),
+    )
     expect(disposeHandlers).toHaveLength(1)
   })
 })

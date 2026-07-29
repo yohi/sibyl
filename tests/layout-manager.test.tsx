@@ -98,10 +98,13 @@ function createDeferred<T>() {
 describe("LayoutManager", () => {
   test("accepts a nested model and propagates it to a recursive layout node", async () => {
     renderedNodes.length = 0
-    const { LayoutManager, LayoutNode } = await import("../src/layout-manager")
+    const { LayoutManager, LayoutNode, createLayoutManagerController } = await import(
+      "../src/layout-manager"
+    )
     const ptyManager = new FakePtyManager()
+    const controller = createLayoutManagerController(ptyManager, nestedModel)
 
-    LayoutManager({ model: nestedModel, ptyManager })
+    LayoutManager({ controller, ptyManager })
 
     expect(getOnlyRenderedNode().type).toBe(LayoutNode)
     const renderedModel = getOnlyRenderedNode().props.model
@@ -139,6 +142,8 @@ describe("LayoutManager", () => {
     const { LayoutNode, createLayoutManagerController } = await import("../src/layout-manager")
     const ptyManager = new FakePtyManager()
     const layout = createLayoutManagerController(ptyManager, nestedModel)
+    const pty = await ptyManager.spawn({ command: "fake-shell", args: [] })
+    await layout.onPtyReady("pane-b", pty.id)
 
     LayoutNode({
       model: layout.model,
@@ -175,14 +180,10 @@ describe("LayoutManager", () => {
       direction: "horizontal",
       children: [
         { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-        {
-          id: "right-split",
-          direction: "vertical",
-          children: [{ id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } }],
-        },
+        { id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } },
       ],
     })
-    expect(layout.focusedId()).toBe("pane-a")
+    expect(layout.focusedId()).toBe("pane-c")
   })
 
   test("preserves an untouched branch without duplicating its PTYs when a sibling pane closes", async () => {
@@ -218,7 +219,7 @@ describe("LayoutManager", () => {
 
     expect(ptyManager.terminatedIds).toEqual([paneCPty.id])
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount)
-    expect(layout.model().children?.[0]).toBe(untouchedBranch)
+    expect(layout.model()).toBe(untouchedBranch)
   })
 
   test("terminates a PTY that finishes spawning after its pane closes", async () => {
@@ -249,7 +250,9 @@ describe("LayoutManager", () => {
       rows: 24,
     })
 
-    await layout.closePane("pane-1")
+    const closing = layout.closePane("pane-1")
+    await Promise.resolve()
+    expect(layout.model().children?.[0]?.id).toBe("pane-1")
     const paneCleanup = getCleanup()
     if (!paneCleanup) throw new Error("Pane cleanup was not registered")
     paneCleanup()
@@ -261,6 +264,7 @@ describe("LayoutManager", () => {
       onExit: () => () => {},
     })
     await terminated.promise
+    await closing
 
     expect(terminatedPtyIds).toEqual(["pty-1"])
     expect(layout.model().children).toEqual([])
