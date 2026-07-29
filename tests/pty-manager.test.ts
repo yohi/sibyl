@@ -112,13 +112,13 @@ describe("PtyManager", () => {
   });
 
   if (process.versions.bun !== undefined) {
-    test("requires a Bun PTY adapter before loading node-pty", async () => {
+    test("uses the built-in Bun PTY adapter when no adapter is injected", async () => {
       const manager = new PtyManager(undefined, async () => {
         throw new Error("node-pty loader invoked");
       });
 
       await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
-        "Bun PTY adapter is required",
+        'Executable not found in $PATH: "fake-shell"',
       );
     });
   }

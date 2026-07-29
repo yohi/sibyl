@@ -55,12 +55,23 @@ export class PtyManager {
     // Pane コンポーネントは spawn() 解決後に onData/onExit を登録する
     // 可能性があるため、バッファをリプレイしないと起動直後の出力や
     // 即時終了が見逃される。
+    const MAX_PENDING_DATA = 1000;
+
     this.pendingData.set(id, []);
     this.pendingExit.set(id, undefined);
 
     const dataSub = terminal.onData((data) => {
       if (!this.exited.has(id)) {
-        this.pendingData.get(id)?.push(data);
+        const callbacks = this.dataCallbacks.get(id);
+        if (callbacks === undefined || callbacks.size === 0) {
+          const buffer = this.pendingData.get(id);
+          if (buffer !== undefined) {
+            buffer.push(data);
+            if (buffer.length > MAX_PENDING_DATA) {
+              buffer.shift();
+            }
+          }
+        }
         this.emitData(id, data);
       }
     });
@@ -231,10 +242,16 @@ export class PtyManager {
 
   private async loadPtyModule(): Promise<PtyModule> {
     if (typeof process.versions.bun === "string") {
-      if (!this.loadBunPtyAdapter) {
-        throw new Error("Bun PTY adapter is required");
+      if (this.loadBunPtyAdapter) {
+        return this.loadBunPtyAdapter();
       }
-      return this.loadBunPtyAdapter();
+      if (process.platform === "win32") {
+        throw new Error(
+          "Bun on Windows does not yet support PTY. Please provide a Bun PTY adapter.",
+        );
+      }
+      const { createBunPtyAdapter } = await import("./bun-pty-adapter.js");
+      return createBunPtyAdapter();
     }
     this.nodePtyModule ??= this.loadNodePty().catch((error: unknown) => {
       throw new Error("No compatible PTY adapter is available", { cause: error });

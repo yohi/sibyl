@@ -1,0 +1,111 @@
+import type { IBasePtyForkOptions, IEvent, IPty } from "node-pty";
+
+type PtyModule = Pick<typeof import("node-pty"), "spawn">;
+
+interface BunPtyOptions {
+  readonly cols?: number;
+  readonly rows?: number;
+  readonly cwd?: string;
+  readonly env?: Record<string, string | undefined>;
+  readonly name?: string;
+}
+
+type BunSubprocess = ReturnType<typeof Bun.spawn>;
+
+class BunPty implements IPty {
+  readonly pid: number;
+  cols: number;
+  rows: number;
+  readonly process: string;
+  handleFlowControl = false;
+  private readonly dataListeners = new Set<(data: string) => void>();
+  private readonly exitListeners = new Set<
+    (event: { exitCode: number; signal?: number }) => void
+  >();
+  private readonly subprocess: BunSubprocess;
+
+  constructor(command: string, args: string[], options: BunPtyOptions) {
+    this.process = command;
+    this.cols = options.cols ?? 80;
+    this.rows = options.rows ?? 24;
+    const textDecoder = new TextDecoder();
+
+    this.subprocess = Bun.spawn([command, ...args], {
+      cwd: options.cwd,
+      env: options.env,
+      terminal: {
+        name: options.name,
+        cols: this.cols,
+        rows: this.rows,
+        data: (_terminal, data) => {
+          const text = textDecoder.decode(data);
+          for (const listener of this.dataListeners) {
+            listener(text);
+          }
+        },
+        exit: async (_terminal, _exitCode, _signal) => {
+          const exitCode = await this.subprocess.exited;
+          for (const listener of this.exitListeners) {
+            listener({ exitCode, signal: undefined });
+          }
+        },
+      },
+    });
+    this.pid = this.subprocess.pid;
+  }
+
+  readonly onData: IEvent<string> = (listener) => {
+    this.dataListeners.add(listener);
+    return {
+      dispose: () => {
+        this.dataListeners.delete(listener);
+      },
+    };
+  };
+
+  readonly onExit: IEvent<{ exitCode: number; signal?: number }> = (listener) => {
+    this.exitListeners.add(listener);
+    return {
+      dispose: () => {
+        this.exitListeners.delete(listener);
+      },
+    };
+  };
+
+  resize(columns: number, rows: number): void {
+    this.subprocess.terminal?.resize(columns, rows);
+    this.cols = columns;
+    this.rows = rows;
+  }
+
+  clear(): void {}
+
+  write(data: Parameters<IPty["write"]>[0]): void {
+    this.subprocess.terminal?.write(String(data));
+  }
+
+  kill(signal?: string): void {
+    if (signal !== undefined) {
+      this.subprocess.kill(signal as Parameters<BunSubprocess["kill"]>[0]);
+    } else {
+      this.subprocess.kill();
+    }
+    this.subprocess.terminal?.close();
+  }
+
+  pause(): void {}
+  resume(): void {}
+}
+
+export function createBunPtyAdapter(): PtyModule {
+  return {
+    spawn: (command, args, options) =>
+      new BunPty(command, Array.isArray(args) ? args : [String(args)], {
+        cols: (options as { cols?: number }).cols,
+        rows: (options as { rows?: number }).rows,
+        cwd: (options as { cwd?: string }).cwd,
+        env: (options as { env?: Record<string, string | undefined> }).env,
+        name: (options as { name?: string }).name,
+      }),
+  };
+}
