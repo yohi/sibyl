@@ -1,18 +1,18 @@
-import { describe, expect, test } from "bun:test"
-import { closePane, findPane, nextLeaf, prevLeaf, removeLeaf, splitPane } from "../src/keymap"
-import type { PaneModel } from "../src/types"
+import { describe, expect, test } from "bun:test";
+import { closePane, findPane, nextLeaf, prevLeaf, removeLeaf, splitPane } from "../src/keymap";
+import type { PaneModel } from "../src/types";
 
 describe("keymap helpers", () => {
   test("splits a leaf pane horizontally while preserving its id", () => {
-    const tree = { id: "root", ptyOptions: { command: "bash", args: [] } }
+    const tree = { id: "root", ptyOptions: { command: "bash", args: [] } };
 
-    const next = splitPane(tree, "root", "horizontal", { command: "bash", args: [] })
+    const next = splitPane(tree, "root", "horizontal", { command: "bash", args: [] });
 
-    expect(next.children).toHaveLength(2)
-    expect(next.direction).toBe("horizontal")
-    expect(next.id).not.toBe("root")
-    expect(next.children?.[0]?.id).toBe("root")
-  })
+    expect(next.children).toHaveLength(2);
+    expect(next.direction).toBe("horizontal");
+    expect(next.id).not.toBe("root");
+    expect(next.children?.[0]?.id).toBe("root");
+  });
 
   test("terminates a leaf before removing it and focuses a remaining pane", async () => {
     const tree = {
@@ -22,21 +22,21 @@ describe("keymap helpers", () => {
         { id: "left", ptyOptions: { command: "bash", args: [] } },
         { id: "right", ptyOptions: { command: "bash", args: [] } },
       ],
-    }
-    const terminated: string[] = []
+    };
+    const terminated: string[] = [];
 
     const result = await closePane(tree, "left", async (leaf) => {
-      terminated.push(leaf.id)
-    })
+      terminated.push(leaf.id);
+    });
 
-    expect(terminated).toEqual(["left"])
+    expect(terminated).toEqual(["left"]);
     expect(result.root).toEqual({
       id: "split-1",
       direction: "horizontal",
       children: [{ id: "right", ptyOptions: { command: "bash", args: [] } }],
-    })
-    expect(result.focusedId).toBe("right")
-  })
+    });
+    expect(result.focusedId).toBe("right");
+  });
 
   test("finds panes and cycles focus through leaves", () => {
     const tree = {
@@ -53,25 +53,25 @@ describe("keymap helpers", () => {
           ],
         },
       ],
-    } satisfies PaneModel
+    } satisfies PaneModel;
 
-    expect(findPane(tree, "middle")?.id).toBe("middle")
-    expect(findPane(tree, "missing")).toBeUndefined()
-    expect(nextLeaf(tree, "middle")).toBe("right")
-    expect(nextLeaf(tree, "right")).toBe("left")
-    expect(prevLeaf(tree, "middle")).toBe("left")
-    expect(prevLeaf(tree, "left")).toBe("right")
-  })
+    expect(findPane(tree, "middle")?.id).toBe("middle");
+    expect(findPane(tree, "missing")).toBeUndefined();
+    expect(nextLeaf(tree, "middle")).toBe("right");
+    expect(nextLeaf(tree, "right")).toBe("left");
+    expect(prevLeaf(tree, "middle")).toBe("left");
+    expect(prevLeaf(tree, "left")).toBe("right");
+  });
 
   test("preserves the root reference when deleting a pane in a different subtree", () => {
     const subtree = {
       id: "left-split",
       direction: "vertical" as const,
       children: [{ id: "left", ptyOptions: { command: "bash", args: [] } }],
-    } satisfies PaneModel
+    } satisfies PaneModel;
 
-    const next = removeLeaf(subtree, "inner-right")
+    const next = removeLeaf(subtree, "inner-right");
 
-    expect(next).toBe(subtree)
-  })
-})
+    expect(next).toBe(subtree);
+  });
+});

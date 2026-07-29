@@ -1,5 +1,5 @@
-import type { PaneModel, PtyOptions } from "./types.js"
+import type { PaneModel, PtyOptions } from "./types.js";
 
 export interface PaneBackend {
-  create(options: PtyOptions): PaneModel
+  create(options: PtyOptions): PaneModel;
 }

@@ -3,10 +3,16 @@
   "organizeImports": {
     "enabled": true
   },
+  "files": {
+    "ignore": [".omo/**", ".nexus/**", "node_modules/**", "dist/**", "coverage/**"]
+  },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true
+      "recommended": true,
+      "suspicious": {
+        "noControlCharactersInRegex": "off"
+      }
     }
   },
   "formatter": {

@@ -1,30 +1,30 @@
-import { describe, expect, test } from "bun:test"
-import plugin from "../src/server"
+import { describe, expect, test } from "bun:test";
+import plugin from "../src/server";
 
 describe("Server plugin", () => {
   test("exports default plugin object", () => {
-    expect(plugin).toHaveProperty("id")
-    expect(plugin).toHaveProperty("server")
-    expect(typeof plugin.server).toBe("function")
-  })
+    expect(plugin).toHaveProperty("id");
+    expect(plugin).toHaveProperty("server");
+    expect(typeof plugin.server).toBe("function");
+  });
 
   test("registers the Sibyl command and ignores other commands", async () => {
-    const hooks = await Reflect.apply(plugin.server, undefined, [undefined])
-    const config: { command?: Record<string, Record<string, string>> } = {}
+    const hooks = await Reflect.apply(plugin.server, undefined, [undefined]);
+    const config: { command?: Record<string, Record<string, string>> } = {};
 
-    await hooks.config?.(config)
+    await hooks.config?.(config);
 
     expect(config.command?.sibyl).toEqual({
       description: "Open Sibyl",
       template: "Open the Sibyl console.",
-    })
-    expect(hooks["command.execute.before"]).toBeFunction()
+    });
+    expect(hooks["command.execute.before"]).toBeFunction();
 
-    const output = { parts: [] }
+    const output = { parts: [] };
     await hooks["command.execute.before"]?.(
       { command: "other", sessionID: "session", arguments: "" },
       output,
-    )
-    expect(output).toEqual({ parts: [] })
-  })
-})
+    );
+    expect(output).toEqual({ parts: [] });
+  });
+});

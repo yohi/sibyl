@@ -1,7 +1,7 @@
-import { nodeResolve } from "@rollup/plugin-node-resolve"
-import babel from "@rollup/plugin-babel"
+import babel from "@rollup/plugin-babel";
+import { nodeResolve } from "@rollup/plugin-node-resolve";
 
-const extensions = [".ts", ".tsx"]
+const extensions = [".ts", ".tsx"];
 
 export default [
   {
@@ -22,4 +22,4 @@ export default [
     external: [/^@opencode-ai/, /^@opentui/, "node-pty"],
     plugins: [nodeResolve({ extensions }), babel({ extensions, babelHelpers: "bundled" })],
   },
-]
+];

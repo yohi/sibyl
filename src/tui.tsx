@@ -1,13 +1,13 @@
 /** @jsxImportSource @opentui/solid */
-import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui"
-import { createLayoutManagerController, LayoutManager } from "./layout-manager.js"
-import { PtyManager } from "./pty-manager.js"
-import type { PaneModel, PtyOptions } from "./types.js"
+import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui";
+import { LayoutManager, createLayoutManagerController } from "./layout-manager.js";
+import { PtyManager } from "./pty-manager.js";
+import type { PaneModel, PtyOptions } from "./types.js";
 
 const defaultPtyOptions = {
   command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
   args: [],
-} satisfies PtyOptions
+} satisfies PtyOptions;
 
 const initialRoot = {
   id: "root",
@@ -17,18 +17,18 @@ const initialRoot = {
       ptyOptions: defaultPtyOptions,
     },
   ],
-} satisfies PaneModel
+} satisfies PaneModel;
 
 const tui: TuiPlugin = async (api) => {
-  const ptyManager = new PtyManager(undefined, () => import("node-pty"))
-  const layout = createLayoutManagerController(ptyManager, initialRoot)
+  const ptyManager = new PtyManager(undefined, () => import("node-pty"));
+  const layout = createLayoutManagerController(ptyManager, initialRoot);
 
   api.route.register([
     {
       name: "sibyl",
       render: () => <LayoutManager ptyManager={ptyManager} controller={layout} />,
     },
-  ])
+  ]);
   api.keymap.registerLayer({
     commands: [
       {
@@ -78,11 +78,11 @@ const tui: TuiPlugin = async (api) => {
       { key: "ctrl+a p", cmd: "sibyl.focus.prev" },
       { key: "ctrl+a x", cmd: "sibyl.close" },
     ],
-  })
-  api.lifecycle.onDispose(() => ptyManager.terminateAll())
-}
+  });
+  api.lifecycle.onDispose(() => ptyManager.terminateAll());
+};
 
 export default {
   id: "oh-my-opencode.sibyl",
   tui,
-} satisfies TuiPluginModule
+} satisfies TuiPluginModule;
