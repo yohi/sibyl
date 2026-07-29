@@ -227,7 +227,10 @@ export class PtyManager {
   }
 
   private async loadPtyModule(): Promise<PtyModule> {
-    if (typeof process.versions.bun === "string" && this.loadBunPtyAdapter) {
+    if (typeof process.versions.bun === "string") {
+      if (!this.loadBunPtyAdapter) {
+        throw new Error("Bun PTY adapter is required");
+      }
       return this.loadBunPtyAdapter();
     }
     this.nodePtyModule ??= this.loadNodePty().catch((error: unknown) => {

@@ -70,7 +70,10 @@ describe("PtyManager", () => {
     const fakeNodePty = {
       spawn: (): IPty => fakePty,
     };
-    const manager = new PtyManager(undefined, async () => fakeNodePty);
+    const manager = new PtyManager(
+      async () => fakeNodePty,
+      async () => fakeNodePty,
+    );
     const pty = await manager.spawn({ command: "fake-shell", args: [], cols: 80, rows: 24 });
 
     expect(() => pty.resize(0, 0)).not.toThrow();
@@ -87,7 +90,10 @@ describe("PtyManager", () => {
         return fakePty;
       },
     };
-    const manager = new PtyManager(undefined, async () => fakeNodePty);
+    const manager = new PtyManager(
+      async () => fakeNodePty,
+      async () => fakeNodePty,
+    );
     const pty = await manager.spawn({ command: "fake-shell", args: [], cols: 80, rows: 24 });
     const received: string[] = [];
 
@@ -104,6 +110,18 @@ describe("PtyManager", () => {
     expect(fakePty.resizes).toEqual([[120, 40]]);
     expect(fakePty.killSignals).toEqual([process.platform === "win32" ? undefined : "SIGTERM"]);
   });
+
+  if (process.versions.bun !== undefined) {
+    test("requires a Bun PTY adapter before loading node-pty", async () => {
+      const manager = new PtyManager(undefined, async () => {
+        throw new Error("node-pty loader invoked");
+      });
+
+      await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
+        "Bun PTY adapter is required",
+      );
+    });
+  }
 });
 
 if (process.versions.bun === undefined) {
