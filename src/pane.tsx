@@ -60,6 +60,10 @@ export function Pane(props: PaneProps) {
           props.onPtyCleanup?.(props.model.id, handle.id);
           return;
         }
+        const oldHandle = ptyHandle();
+        if (oldHandle !== undefined) {
+          props.onPtyCleanup?.(props.model.id, oldHandle.id);
+        }
         setPtyHandle(handle);
         removeDataListener = handle.onData(appendOutput);
         removeExitListener = handle.onExit(() => {

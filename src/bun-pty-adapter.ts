@@ -28,7 +28,8 @@ class BunPty implements IPty {
     this.process = command;
     this.cols = options.cols ?? 80;
     this.rows = options.rows ?? 24;
-    const textDecoder = new TextDecoder();
+    const textDecoder = new TextDecoder("utf-8", { fatal: false });
+    let incomplete = "";
 
     this.subprocess = Bun.spawn([command, ...args], {
       cwd: options.cwd,
@@ -38,9 +39,17 @@ class BunPty implements IPty {
         cols: this.cols,
         rows: this.rows,
         data: (_terminal, data) => {
-          const text = textDecoder.decode(data);
+          const chunk = textDecoder.decode(data, { stream: true });
+          const text = incomplete + chunk;
+          const lastCodePoint = text.charCodeAt(text.length - 1);
+          if (lastCodePoint >= 0xd800 && lastCodePoint <= 0xdbff) {
+            incomplete = text.slice(-1);
+          } else {
+            incomplete = "";
+          }
+          const emitText = incomplete ? text.slice(0, -1) : text;
           for (const listener of this.dataListeners) {
-            listener(text);
+            listener(emitText);
           }
         },
         exit: async (_terminal, _exitCode, _signal) => {
