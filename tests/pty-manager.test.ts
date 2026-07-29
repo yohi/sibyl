@@ -66,11 +66,15 @@ class FakePty implements IPty {
 
 describe("PtyManager", () => {
   test("resize validates dimensions", async () => {
-    const manager = new PtyManager()
-    const shell = process.platform === "win32" ? "cmd.exe" : "bash"
-    const pty = await manager.spawn({ command: shell, args: [], cols: 80, rows: 24 })
+    const fakePty = new FakePty()
+    const fakeNodePty = {
+      spawn: (): IPty => fakePty,
+    }
+    const manager = new PtyManager(undefined, async () => fakeNodePty)
+    const pty = await manager.spawn({ command: "fake-shell", args: [], cols: 80, rows: 24 })
 
     expect(() => pty.resize(0, 0)).not.toThrow()
+    expect(fakePty.resizes).toEqual([])
 
     await manager.terminate(pty.id)
   })
