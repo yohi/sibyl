@@ -1,5 +1,5 @@
 /** @jsxImportSource @opentui/solid */
-import { createSignal, For } from "solid-js"
+import { For, Show, createSignal } from "solid-js"
 import type { Accessor } from "solid-js"
 import {
   findPane,
@@ -30,38 +30,12 @@ export interface LayoutManagerController {
   readonly focusPane: (paneId: PaneId) => void
 }
 
-interface PendingPtyTermination {
-  readonly promise: Promise<void>
-  readonly resolve: () => void
-  readonly reject: (error: unknown) => void
-}
-
 export function createLayoutManagerController(
-  ptyManager: Pick<PtyManager, "terminate">,
+  _ptyManager: Pick<PtyManager, "terminate">,
   initialModel: PaneModel,
 ) {
   const [model, setModel] = createSignal(initialModel)
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel))
-  const ptyIdsByPane = new Map<string, PtyId>()
-  const replacedPtyIdsByPane = new Map<string, PtyId>()
-  const pendingPtyTerminations = new Map<string, PendingPtyTermination>()
-
-  const terminateLeaf = async (leaf: PaneModel) => {
-    const ptyId = ptyIdsByPane.get(leaf.id)
-    if (ptyId !== undefined) {
-      const isWaitingForReplacement = replacedPtyIdsByPane.delete(leaf.id)
-      const pending = isWaitingForReplacement ? createPendingPtyTermination() : undefined
-      if (pending !== undefined) pendingPtyTerminations.set(leaf.id, pending)
-      await ptyManager.terminate(ptyId)
-      ptyIdsByPane.delete(leaf.id)
-      if (pending !== undefined) await pending.promise
-      return
-    }
-
-    const pending = pendingPtyTerminations.get(leaf.id) ?? createPendingPtyTermination()
-    pendingPtyTerminations.set(leaf.id, pending)
-    await pending.promise
-  }
 
   const splitPane = (direction: SplitDirection, newPtyOptions: PtyOptions) => {
     const focused = focusedId()
@@ -69,8 +43,6 @@ export function createLayoutManagerController(
     const target = findPane(model(), focused)
     if (target === undefined || target.children !== undefined) return
 
-    const previousPtyId = ptyIdsByPane.get(target.id)
-    if (previousPtyId !== undefined) replacedPtyIdsByPane.set(target.id, previousPtyId)
     setModel((current) => splitPaneInTree(current, focused, direction, newPtyOptions))
   }
 
@@ -79,7 +51,6 @@ export function createLayoutManagerController(
     const target = findPane(model(), id)
     if (target === undefined || target.children !== undefined) return
 
-    await terminateLeaf(target)
     let focusCandidate: PaneId | undefined
     setModel((current) => {
       focusCandidate = nextLeaf(current, id)
@@ -104,29 +75,7 @@ export function createLayoutManagerController(
     if (focused !== undefined) setFocusedId(prevLeaf(model(), focused))
   }
 
-  const onPtyReady = async (paneId: string, ptyId: PtyId) => {
-    const pending = pendingPtyTerminations.get(paneId)
-    if (pending !== undefined) {
-      try {
-        await ptyManager.terminate(ptyId)
-        ptyIdsByPane.delete(paneId)
-        pending.resolve()
-      } catch (error) {
-        pending.reject(error)
-        throw error
-      } finally {
-        pendingPtyTerminations.delete(paneId)
-      }
-      return
-    }
-
-    const replacedPtyId = replacedPtyIdsByPane.get(paneId)
-    if (replacedPtyId !== undefined) {
-      await ptyManager.terminate(replacedPtyId)
-      replacedPtyIdsByPane.delete(paneId)
-    }
-    ptyIdsByPane.set(paneId, ptyId)
-  }
+  const onPtyReady = async (_paneId: PaneId, _ptyId: PtyId): Promise<void> => {}
 
   return {
     model,
@@ -150,6 +99,7 @@ export function LayoutManager(props: LayoutManagerProps) {
       focusedId={focusedId}
       onFocus={focusPane}
       onPtyReady={onPtyReady}
+      onPtyCleanup={(ptyId) => props.ptyManager.terminate(ptyId)}
       isRoot={true}
     />
   )
@@ -161,44 +111,49 @@ export interface LayoutNodeProps {
   readonly focusedId: () => string | undefined
   readonly onFocus: (paneId: string) => void
   readonly onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>
+  readonly onPtyCleanup: (ptyId: PtyId) => void
   readonly isRoot?: boolean
 }
 
 export function LayoutNode(props: LayoutNodeProps) {
-  const children = props.model().children
-  if (children !== undefined) {
-    return (
-      <box
-        flexDirection={props.model().direction === "vertical" ? "column" : "row"}
-        flexGrow={1}
-        width={props.isRoot ? "100%" : undefined}
-        height={props.isRoot ? "100%" : undefined}
-      >
-        <For each={props.model().children}>
-          {(child) => (
-            <LayoutNode
-              model={() => child}
-              ptyManager={props.ptyManager}
-              focusedId={props.focusedId}
-              onFocus={props.onFocus}
-              onPtyReady={props.onPtyReady}
-            />
-          )}
-        </For>
-      </box>
-    )
-  }
-
   return (
-    <Pane
-      model={props.model()}
-      ptyManager={props.ptyManager}
-      focused={props.focusedId() === props.model().id}
-      onFocus={() => props.onFocus(props.model().id)}
-      onPtyReady={props.onPtyReady}
-      cols={80}
-      rows={24}
-    />
+    <Show
+      when={props.model().children}
+      fallback={
+        <Pane
+          model={props.model()}
+          ptyManager={props.ptyManager}
+          focused={props.focusedId() === props.model().id}
+          onFocus={() => props.onFocus(props.model().id)}
+          onPtyReady={props.onPtyReady}
+          onPtyCleanup={props.onPtyCleanup}
+          cols={80}
+          rows={24}
+        />
+      }
+    >
+      {(children) => (
+        <box
+          flexDirection={props.model().direction === "vertical" ? "column" : "row"}
+          flexGrow={1}
+          width={props.isRoot ? "100%" : undefined}
+          height={props.isRoot ? "100%" : undefined}
+        >
+          <For each={children()}>
+            {(child) => (
+              <LayoutNode
+                model={() => child}
+                ptyManager={props.ptyManager}
+                focusedId={props.focusedId}
+                onFocus={props.onFocus}
+                onPtyReady={props.onPtyReady}
+                onPtyCleanup={props.onPtyCleanup}
+              />
+            )}
+          </For>
+        </box>
+      )}
+    </Show>
   )
 }
 
@@ -212,17 +167,4 @@ export function firstLeafId(model: PaneModel): string | undefined {
   }
 
   return undefined
-}
-
-function createPendingPtyTermination(): PendingPtyTermination {
-  let resolvePromise: (() => void) | undefined
-  let rejectPromise: ((error: unknown) => void) | undefined
-  const promise = new Promise<void>((resolve, reject) => {
-    resolvePromise = resolve
-    rejectPromise = reject
-  })
-  if (resolvePromise === undefined || rejectPromise === undefined) {
-    throw new Error("Failed to initialize pending PTY termination")
-  }
-  return { promise, resolve: resolvePromise, reject: rejectPromise }
 }

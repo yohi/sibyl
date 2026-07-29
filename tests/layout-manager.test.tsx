@@ -3,6 +3,7 @@ import type { PtyHandle, PtyManager } from "../src/pty-manager"
 import type { PaneModel } from "../src/types"
 import { FakePtyManager } from "./fake-pty-manager"
 
+// allow: SIZE_OK — Solid lifecycle mocks intentionally share one module-scoped LayoutManager suite.
 const lifecycle: { cleanup?: () => void } = {}
 
 function isSignalUpdater<T>(next: T | ((previous: T) => T)): next is (previous: T) => T {
@@ -30,6 +31,7 @@ mock.module("solid-js", () => ({
   },
   onMount: (callback: () => void) => callback(),
   For: () => null,
+  Show,
 }))
 
 mock.module("@opentui/solid", () => ({ useKeyboard: () => {} }))
@@ -42,9 +44,28 @@ interface RenderedNode {
 const renderedNodes: RenderedNode[] = []
 
 function renderNode(type: unknown, props?: Record<string, unknown>): RenderedNode {
+  if (type === Show) return Show(props ?? {})
   const node = { type, props: props ?? {} }
   renderedNodes.push(node)
   return node
+}
+
+function Show(props: Readonly<Record<string, unknown>>): RenderedNode {
+  const content = props.when
+    ? isShowRenderFunction(props.children)
+      ? props.children(() => props.when)
+      : props.children
+    : props.fallback
+  if (!isRenderedNode(content)) throw new Error("Show did not render a layout node")
+  return content
+}
+
+function isShowRenderFunction(value: unknown): value is (when: () => unknown) => unknown {
+  return typeof value === "function"
+}
+
+function isRenderedNode(value: unknown): value is RenderedNode {
+  return typeof value === "object" && value !== null && "type" in value && "props" in value
 }
 
 mock.module("@opentui/solid/jsx-runtime", () => ({
@@ -95,6 +116,21 @@ function createDeferred<T>() {
   }
 }
 
+function createPtyHandle(id: string): PtyHandle {
+  return {
+    id,
+    write: () => {},
+    resize: () => {},
+    onData: () => () => {},
+    onExit: () => () => {},
+  }
+}
+
+async function settlePromises(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe("LayoutManager", () => {
   test("accepts a nested model and propagates it to a recursive layout node", async () => {
     renderedNodes.length = 0
@@ -122,6 +158,7 @@ describe("LayoutManager", () => {
       focusedId: () => "pane-a",
       onFocus: () => {},
       onPtyReady: async () => {},
+      onPtyCleanup: (ptyId: string) => ptyManager.terminate(ptyId),
     }
 
     renderedNodes.length = 0
@@ -151,6 +188,7 @@ describe("LayoutManager", () => {
       focusedId: layout.focusedId,
       onFocus: layout.focusPane,
       onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
     })
     expect(getOnlyRenderedNode().type).toBe("box")
 
@@ -165,7 +203,7 @@ describe("LayoutManager", () => {
     expect(firstLeafId(nestedModel)).toBe("pane-a")
   })
 
-  test("removes a nested leaf, terminates its PTY, and focuses the leftmost leaf", async () => {
+  test("removes a nested leaf without terminating its PTY from the controller", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager")
     const ptyManager = new FakePtyManager()
     const layout = createLayoutManagerController(ptyManager, nestedModel)
@@ -174,7 +212,7 @@ describe("LayoutManager", () => {
     await layout.onPtyReady("pane-b", pty.id)
     await layout.closePane("pane-b")
 
-    expect(ptyManager.terminatedIds).toEqual([pty.id])
+    expect(ptyManager.terminatedIds).toEqual([])
     expect(layout.model()).toEqual({
       id: "root",
       direction: "horizontal",
@@ -186,7 +224,7 @@ describe("LayoutManager", () => {
     expect(layout.focusedId()).toBe("pane-c")
   })
 
-  test("preserves an untouched branch without duplicating its PTYs when a sibling pane closes", async () => {
+  test("preserves an untouched branch without terminating PTYs from the controller", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager")
     const model = {
       id: "root",
@@ -217,112 +255,160 @@ describe("LayoutManager", () => {
 
     await layout.closePane("pane-c")
 
-    expect(ptyManager.terminatedIds).toEqual([paneCPty.id])
+    expect(ptyManager.terminatedIds).toEqual([])
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount)
     expect(layout.model()).toBe(untouchedBranch)
   })
 
-  test("terminates the replaced PTY and retains the replacement for a split pane", async () => {
+  test("terminates the original PTY when it resolves after its pane unmounts during a split", async () => {
+    // Given
+    lifecycle.cleanup = undefined
     const { createLayoutManagerController } = await import("../src/layout-manager")
-    const ptyManager = new FakePtyManager()
+    const { Pane } = await import("../src/pane")
+    const originalPty = createDeferred<PtyHandle>()
+    const replacementPty = createDeferred<PtyHandle>()
+    const terminatedPtyIds: string[] = []
+    const ptysToSpawn = [originalPty.promise, replacementPty.promise]
+    const ptyManager: Pick<PtyManager, "spawn" | "terminate"> = {
+      spawn: () => {
+        const pty = ptysToSpawn.shift()
+        if (!pty) throw new Error("Unexpected PTY spawn")
+        return pty
+      },
+      terminate: async (ptyId) => {
+        terminatedPtyIds.push(ptyId)
+      },
+    }
     const layout = createLayoutManagerController(ptyManager, {
       id: "pane-a",
       ptyOptions: { command: "fake-shell", args: [] },
     })
-    const originalPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
 
-    await layout.onPtyReady("pane-a", originalPty.id)
-    layout.splitPane("horizontal", { command: "fake-shell", args: [] })
-
-    const replacementPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
-    await layout.onPtyReady("pane-a", replacementPty.id)
-
-    expect(ptyManager.terminatedIds).toEqual([originalPty.id])
-
-    await layout.closePane("pane-a")
-
-    expect(ptyManager.terminatedIds).toEqual([originalPty.id, replacementPty.id])
-  })
-
-  test("preserves a split made while another pane is awaiting termination", async () => {
-    const { createLayoutManagerController } = await import("../src/layout-manager")
-    const terminationStarted = createDeferred<void>()
-    const finishTermination = createDeferred<void>()
-    const ptyManager: Pick<PtyManager, "terminate"> = {
-      terminate: async () => {
-        terminationStarted.resolve()
-        await finishTermination.promise
-      },
-    }
-    const layout = createLayoutManagerController(ptyManager, {
-      id: "root",
-      direction: "horizontal",
-      children: [
-        { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-        { id: "pane-b", ptyOptions: { command: "fake-shell", args: [] } },
-      ],
-    })
-
-    await layout.onPtyReady("pane-a", "pty-a")
-    await layout.onPtyReady("pane-b", "pty-b")
-    const closing = layout.closePane("pane-a")
-    await terminationStarted.promise
-
-    layout.focusPane("pane-b")
-    layout.splitPane("vertical", { command: "fake-shell", args: [] })
-    finishTermination.resolve()
-    await closing
-
-    expect(layout.model().children).toHaveLength(2)
-    expect(collectPaneIds(layout.model())).toContain("pane-b")
-    expect(collectPaneIds(layout.model())).toHaveLength(3)
-  })
-
-  test("terminates a PTY that finishes spawning after its pane closes", async () => {
-    lifecycle.cleanup = undefined
-    const { createLayoutManagerController } = await import("../src/layout-manager")
-    const { Pane } = await import("../src/pane")
-    const spawnedPty = createDeferred<PtyHandle>()
-    const terminated = createDeferred<void>()
-    const terminatedPtyIds: string[] = []
-    const ptyManager: Pick<PtyManager, "spawn" | "terminate"> = {
-      spawn: () => spawnedPty.promise,
-      terminate: async (ptyId) => {
-        terminatedPtyIds.push(ptyId)
-        terminated.resolve()
-      },
-    }
-    const layout = createLayoutManagerController(ptyManager, {
-      id: "root",
-      children: [{ id: "pane-1", ptyOptions: { command: "fake-shell", args: [] } }],
-    })
     Pane({
-      model: { id: "pane-1", ptyOptions: { command: "fake-shell", args: [] } },
+      model: { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
       ptyManager,
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     })
+    const originalPaneCleanup = getCleanup()
+    if (!originalPaneCleanup) throw new Error("Original Pane cleanup was not registered")
 
-    const closing = layout.closePane("pane-1")
-    await Promise.resolve()
-    expect(layout.model().children?.[0]?.id).toBe("pane-1")
-    const paneCleanup = getCleanup()
-    if (!paneCleanup) throw new Error("Pane cleanup was not registered")
-    paneCleanup()
-    spawnedPty.resolve({
-      id: "pty-1",
-      write: () => {},
-      resize: () => {},
-      onData: () => () => {},
-      onExit: () => () => {},
+    // When
+    layout.splitPane("horizontal", { command: "fake-shell", args: [] })
+    originalPaneCleanup()
+    const replacementModel = layout.model().children?.[0]
+    if (!replacementModel) throw new Error("Split replacement pane is missing")
+    Pane({
+      model: replacementModel,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      cols: 80,
+      rows: 24,
     })
-    await terminated.promise
-    await closing
+    originalPty.resolve(createPtyHandle("pty-original"))
+    replacementPty.resolve(createPtyHandle("pty-replacement"))
+    await Promise.all([originalPty.promise, replacementPty.promise])
+    await settlePromises()
 
-    expect(terminatedPtyIds).toEqual(["pty-1"])
-    expect(layout.model().children).toEqual([])
+    // Then
+    expect(ptysToSpawn).toHaveLength(0)
+    expect(terminatedPtyIds).toEqual(["pty-original"])
+  })
+
+  test("closes promptly while a split PTY termination remains pending and leaves the sibling PTY active", async () => {
+    // Given
+    lifecycle.cleanup = undefined
+    const { createLayoutManagerController } = await import("../src/layout-manager")
+    const { Pane } = await import("../src/pane")
+    const terminationStarted = createDeferred<void>()
+    const finishTermination = createDeferred<void>()
+    const terminatedPtyIds: string[] = []
+    const ptysToSpawn = [
+      createPtyHandle("pty-original"),
+      createPtyHandle("pty-replacement"),
+      createPtyHandle("pty-sibling"),
+    ]
+    const ptyManager: Pick<PtyManager, "spawn" | "terminate"> = {
+      spawn: async () => {
+        const pty = ptysToSpawn.shift()
+        if (!pty) throw new Error("Unexpected PTY spawn")
+        return pty
+      },
+      terminate: async (ptyId) => {
+        terminatedPtyIds.push(ptyId)
+        if (ptyId === "pty-original") {
+          terminationStarted.resolve()
+          await finishTermination.promise
+        }
+      },
+    }
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    })
+
+    Pane({
+      model: { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      cols: 80,
+      rows: 24,
+    })
+    await settlePromises()
+    const originalPaneCleanup = getCleanup()
+    if (!originalPaneCleanup) throw new Error("Original Pane cleanup was not registered")
+
+    // When
+    layout.splitPane("vertical", { command: "fake-shell", args: [] })
+    originalPaneCleanup()
+    const splitChildren = layout.model().children
+    const replacementModel = splitChildren?.[0]
+    const siblingModel = splitChildren?.[1]
+    if (!replacementModel || !siblingModel) throw new Error("Split pane models are missing")
+    Pane({
+      model: replacementModel,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      cols: 80,
+      rows: 24,
+    })
+    const replacementPaneCleanup = getCleanup()
+    if (!replacementPaneCleanup) throw new Error("Replacement Pane cleanup was not registered")
+    Pane({
+      model: siblingModel,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady: layout.onPtyReady,
+      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      cols: 80,
+      rows: 24,
+    })
+    await settlePromises()
+    await terminationStarted.promise
+    const closing = layout.closePane("pane-a")
+
+    // Then
+    expect(collectPaneIds(layout.model())).toEqual([siblingModel.id])
+    expect(layout.focusedId()).toBe(siblingModel.id)
+    replacementPaneCleanup()
+    await closing
+    expect(terminatedPtyIds).toEqual(["pty-original", "pty-replacement"])
+    expect(terminatedPtyIds).not.toContain("pty-sibling")
+    finishTermination.resolve()
+    await settlePromises()
   })
 })

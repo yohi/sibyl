@@ -11,6 +11,7 @@ export interface PaneProps {
   focused: boolean
   onFocus: () => void
   onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>
+  onPtyCleanup?: (ptyId: PtyId) => void
   cols: number
   rows: number
 }
@@ -44,7 +45,10 @@ export function Pane(props: PaneProps) {
       .spawn(props.model.ptyOptions)
       .then(async (handle) => {
         await props.onPtyReady(props.model.id, handle.id)
-        if (disposed) return
+        if (disposed) {
+          props.onPtyCleanup?.(handle.id)
+          return
+        }
         ptyHandle = handle
         removeDataListener = handle.onData(appendOutput)
         removeExitListener = handle.onExit(() => {
@@ -63,6 +67,7 @@ export function Pane(props: PaneProps) {
     disposed = true
     removeDataListener()
     removeExitListener()
+    if (ptyHandle !== undefined) props.onPtyCleanup?.(ptyHandle.id)
   })
 
   useKeyboard((event) => {
