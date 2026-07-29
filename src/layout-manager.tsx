@@ -2,9 +2,10 @@
 import { createSignal, For } from "solid-js"
 import type { Accessor } from "solid-js"
 import {
-  closePane as closePaneInTree,
+  findPane,
   nextLeaf,
   prevLeaf,
+  removeLeaf,
   splitPane as splitPaneInTree,
 } from "./keymap.js"
 import { Pane } from "./pane.js"
@@ -42,13 +43,18 @@ export function createLayoutManagerController(
   const [model, setModel] = createSignal(initialModel)
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel))
   const ptyIdsByPane = new Map<string, PtyId>()
+  const replacedPtyIdsByPane = new Map<string, PtyId>()
   const pendingPtyTerminations = new Map<string, PendingPtyTermination>()
 
   const terminateLeaf = async (leaf: PaneModel) => {
     const ptyId = ptyIdsByPane.get(leaf.id)
     if (ptyId !== undefined) {
+      const isWaitingForReplacement = replacedPtyIdsByPane.delete(leaf.id)
+      const pending = isWaitingForReplacement ? createPendingPtyTermination() : undefined
+      if (pending !== undefined) pendingPtyTerminations.set(leaf.id, pending)
       await ptyManager.terminate(ptyId)
       ptyIdsByPane.delete(leaf.id)
+      if (pending !== undefined) await pending.promise
       return
     }
 
@@ -60,15 +66,32 @@ export function createLayoutManagerController(
   const splitPane = (direction: SplitDirection, newPtyOptions: PtyOptions) => {
     const focused = focusedId()
     if (focused === undefined) return
+    const target = findPane(model(), focused)
+    if (target === undefined || target.children !== undefined) return
+
+    const previousPtyId = ptyIdsByPane.get(target.id)
+    if (previousPtyId !== undefined) replacedPtyIdsByPane.set(target.id, previousPtyId)
     setModel((current) => splitPaneInTree(current, focused, direction, newPtyOptions))
   }
 
   const closePane = async (id = focusedId()) => {
     if (id === undefined) return
+    const target = findPane(model(), id)
+    if (target === undefined || target.children !== undefined) return
+
+    await terminateLeaf(target)
+    let focusCandidate: PaneId | undefined
+    setModel((current) => {
+      focusCandidate = nextLeaf(current, id)
+      return removeLeaf(current, id) ?? { id: current.id, children: [] }
+    })
+
     const current = model()
-    const result = await closePaneInTree(current, id, terminateLeaf)
-    setModel(result.root ?? { id: current.id, children: [] })
-    setFocusedId(result.focusedId)
+    setFocusedId(
+      focusCandidate !== undefined && findPane(current, focusCandidate) !== undefined
+        ? focusCandidate
+        : firstLeafId(current),
+    )
   }
 
   const focusNext = () => {
@@ -95,6 +118,12 @@ export function createLayoutManagerController(
         pendingPtyTerminations.delete(paneId)
       }
       return
+    }
+
+    const replacedPtyId = replacedPtyIdsByPane.get(paneId)
+    if (replacedPtyId !== undefined) {
+      await ptyManager.terminate(replacedPtyId)
+      replacedPtyIdsByPane.delete(paneId)
     }
     ptyIdsByPane.set(paneId, ptyId)
   }

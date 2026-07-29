@@ -92,7 +92,7 @@ function collectLeaves(root: PaneModel): PaneModel[] {
   return root.children.flatMap(collectLeaves)
 }
 
-function removeLeaf(root: PaneModel, targetId: string): PaneModel | undefined {
+export function removeLeaf(root: PaneModel, targetId: string): PaneModel | undefined {
   if (!root.children) return root.id === targetId ? undefined : root
 
   let nextChildren: PaneModel[] | undefined

@@ -222,6 +222,62 @@ describe("LayoutManager", () => {
     expect(layout.model()).toBe(untouchedBranch)
   })
 
+  test("terminates the replaced PTY and retains the replacement for a split pane", async () => {
+    const { createLayoutManagerController } = await import("../src/layout-manager")
+    const ptyManager = new FakePtyManager()
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    })
+    const originalPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
+
+    await layout.onPtyReady("pane-a", originalPty.id)
+    layout.splitPane("horizontal", { command: "fake-shell", args: [] })
+
+    const replacementPty = await ptyManager.spawn({ command: "fake-shell", args: [] })
+    await layout.onPtyReady("pane-a", replacementPty.id)
+
+    expect(ptyManager.terminatedIds).toEqual([originalPty.id])
+
+    await layout.closePane("pane-a")
+
+    expect(ptyManager.terminatedIds).toEqual([originalPty.id, replacementPty.id])
+  })
+
+  test("preserves a split made while another pane is awaiting termination", async () => {
+    const { createLayoutManagerController } = await import("../src/layout-manager")
+    const terminationStarted = createDeferred<void>()
+    const finishTermination = createDeferred<void>()
+    const ptyManager: Pick<PtyManager, "terminate"> = {
+      terminate: async () => {
+        terminationStarted.resolve()
+        await finishTermination.promise
+      },
+    }
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "root",
+      direction: "horizontal",
+      children: [
+        { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+        { id: "pane-b", ptyOptions: { command: "fake-shell", args: [] } },
+      ],
+    })
+
+    await layout.onPtyReady("pane-a", "pty-a")
+    await layout.onPtyReady("pane-b", "pty-b")
+    const closing = layout.closePane("pane-a")
+    await terminationStarted.promise
+
+    layout.focusPane("pane-b")
+    layout.splitPane("vertical", { command: "fake-shell", args: [] })
+    finishTermination.resolve()
+    await closing
+
+    expect(layout.model().children).toHaveLength(2)
+    expect(collectPaneIds(layout.model())).toContain("pane-b")
+    expect(collectPaneIds(layout.model())).toHaveLength(3)
+  })
+
   test("terminates a PTY that finishes spawning after its pane closes", async () => {
     lifecycle.cleanup = undefined
     const { createLayoutManagerController } = await import("../src/layout-manager")
