@@ -24,3 +24,25 @@ DONE
 
 - Bun実行時は `loadBunPtyAdapter` 未指定の場合に明示的なエラーを投げるため、Bun用アダプターが提供されるまで node-pty の自動ロードは行われません。
 - レポート作成時点で作業ツリーはクリーンです。
+
+## Critical issue fix (2026-07-29)
+
+### Status
+
+DONE
+
+### Commits
+
+- `cceb465` — `fix: サーバー安全な公開APIに限定`
+
+### Verification output
+
+- `bun run build`: 成功。`dist/index.js`、`dist/server.js`、`dist/tui.js`を生成。
+- `node -e 'import("./dist/index.js")'`: 成功。`window is not defined` は発生せず、コア公開APIのみを確認。
+- `bun run lint && bun run typecheck && bun test`: 成功。Biomeは25ファイルを検査、TypeScriptエラーなし、30 tests passed、0 failed、74 expect calls。
+- `npm pack --dry-run --json`: 成功。パッケージ収録対象に `dist/index.js`（9,984 bytes）が含まれることを確認。
+- `GIT_MASTER=1 git diff --check`: 成功。空白エラーなし。
+
+### Concerns
+
+- LSP診断は2ファイルとも3秒の待機時間超過となったが、`bun run typecheck` は成功している。
