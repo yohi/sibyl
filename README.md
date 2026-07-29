@@ -15,3 +15,15 @@ bun install
 bun run build
 bun test
 ```
+
+## Installation
+
+```json
+{
+  "plugin": ["@yohi/sibyl"]
+}
+```
+
+## Usage
+
+OpenCode TUI 内で `ctrl+shift+s` または command palette から `sibyl.open` を実行する。
