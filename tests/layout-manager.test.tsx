@@ -202,7 +202,7 @@ describe("LayoutManager", () => {
       focusedId: layout.focusedId,
       onFocus: layout.focusPane,
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
     });
     expect(getOnlyRenderedNode().type).toBe("box");
 
@@ -313,7 +313,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     });
@@ -331,7 +331,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     });
@@ -383,7 +383,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     });
@@ -404,7 +404,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     });
@@ -416,7 +416,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     });
@@ -467,7 +467,7 @@ describe("LayoutManager", () => {
       focused: true,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => onPtyCleanup(closingPane.id, ptyId),
+      onPtyCleanup: (_paneId, ptyId) => onPtyCleanup(closingPane.id, ptyId),
       cols: 80,
       rows: 24,
     });
@@ -481,7 +481,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady: layout.onPtyReady,
-      onPtyCleanup: (ptyId) => onPtyCleanup(survivingPane.id, ptyId),
+      onPtyCleanup: (_paneId, ptyId) => onPtyCleanup(survivingPane.id, ptyId),
       cols: 80,
       rows: 24,
     });
@@ -540,7 +540,7 @@ describe("LayoutManager", () => {
       focused: false,
       onFocus: () => {},
       onPtyReady,
-      onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
       cols: 80,
       rows: 24,
     });
@@ -559,7 +559,7 @@ describe("LayoutManager", () => {
         focused: true,
         onFocus: () => {},
         onPtyReady,
-        onPtyCleanup: (ptyId) => ptyManager.terminate(ptyId),
+        onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
         cols: 80,
         rows: 24,
       });
