@@ -61,3 +61,30 @@ DONE
 
 - `.omo/` の未追跡ファイルは今回のコミットに含めていません。
 - 既存の Node-only 実シェルテストは Bun 実行時にガードされ、Node 環境でのみ実行されます。
+
+## Task 10 Mock Fix Report
+
+### Status
+
+DONE
+
+### Changes
+
+- `tests/layout-manager.test.tsx` の `solid-js` モックに `createEffect: () => {}` を追加。
+- `@opentui/solid` モックに固定サイズを返す `useTerminalDimensions` を追加。
+- Production code は変更していません。
+
+### Commits
+
+- `fix: レイアウトマネージャーテストの依存モックを追加`
+
+### Verification
+
+- `bun test tests/layout-manager.test.tsx`: PASS（11 tests, 0 failures, 31 expectations）。
+- `bunx tsc --noEmit`: PASS（終了コード 0、出力なし）。
+- `bun test`: PASS（28 tests, 0 failures, 72 expectations）。
+
+### Concerns
+
+- LSP diagnostics は3秒以内に fresh diagnostics を取得できずタイムアウトしました。
+- `.omo/` の未追跡ファイルは今回のコミットに含めていません。

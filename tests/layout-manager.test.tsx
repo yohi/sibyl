@@ -26,6 +26,7 @@ function createSignal<T>(initial: T) {
 
 mock.module("solid-js", () => ({
   createSignal,
+  createEffect: () => {},
   onCleanup: (callback: () => void) => {
     lifecycle.cleanup = callback
   },
@@ -34,7 +35,10 @@ mock.module("solid-js", () => ({
   Show,
 }))
 
-mock.module("@opentui/solid", () => ({ useKeyboard: () => {} }))
+mock.module("@opentui/solid", () => ({
+  useKeyboard: () => {},
+  useTerminalDimensions: () => () => ({ width: 80, height: 24 }),
+}))
 
 interface RenderedNode {
   readonly type: unknown
