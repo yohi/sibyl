@@ -30,7 +30,7 @@ mock.module("solid-js", () => ({
     lifecycle.cleanup = callback
   },
   onMount: (callback: () => void) => callback(),
-  For: () => null,
+  For,
   Show,
 }))
 
@@ -43,8 +43,9 @@ interface RenderedNode {
 
 const renderedNodes: RenderedNode[] = []
 
-function renderNode(type: unknown, props?: Record<string, unknown>): RenderedNode {
+function renderNode(type: unknown, props?: Record<string, unknown>): RenderedNode | null {
   if (type === Show) return Show(props ?? {})
+  if (type === For) return For(props ?? {})
   const node = { type, props: props ?? {} }
   renderedNodes.push(node)
   return node
@@ -58,6 +59,15 @@ function Show(props: Readonly<Record<string, unknown>>): RenderedNode {
     : props.fallback
   if (!isRenderedNode(content)) throw new Error("Show did not render a layout node")
   return content
+}
+
+const renderedForItems: unknown[][] = []
+
+function For(props: Readonly<Record<string, unknown>>): null {
+  const items = props.each
+  if (!Array.isArray(items)) throw new Error("For items are missing")
+  renderedForItems.push(items)
+  return null
 }
 
 function isShowRenderFunction(value: unknown): value is (when: () => unknown) => unknown {
@@ -554,5 +564,87 @@ describe("LayoutManager", () => {
     }
 
     expect(ptyIds.get(survivingPane.id)).toBe(originalPtyId)
+  })
+
+  test("does not respawn inner-left PTY when closing inner-right from a nested split", async () => {
+    lifecycle.cleanup = undefined
+    renderedNodes.length = 0
+    renderedForItems.length = 0
+    const { LayoutNode, createLayoutManagerController } = await import("../src/layout-manager")
+    const { Pane } = await import("../src/pane")
+    const outerLeft = { id: "outer-left", ptyOptions: { command: "fake-shell", args: [] } }
+    const innerLeft = { id: "inner-left", ptyOptions: { command: "fake-shell", args: [] } }
+    const innerRight = { id: "inner-right", ptyOptions: { command: "fake-shell", args: [] } }
+    const innerSplit = {
+      id: "inner-split",
+      direction: "vertical" as const,
+      children: [innerLeft, innerRight],
+    }
+    const model = {
+      id: "root",
+      direction: "horizontal" as const,
+      children: [outerLeft, innerSplit],
+    } satisfies PaneModel
+    const ptyManager = new FakePtyManager()
+    const layout = createLayoutManagerController(ptyManager, model)
+    const ptyIds = new Map<string, string>()
+    const onPtyReady = async (paneId: string, ptyId: string) => {
+      ptyIds.set(paneId, ptyId)
+    }
+    const nodeProps = {
+      model: layout.model,
+      ptyManager,
+      focusedId: layout.focusedId,
+      onFocus: layout.focusPane,
+      onPtyReady,
+      onPtyCleanup: (_paneId: string, ptyId: string) => ptyManager.terminate(ptyId),
+    }
+
+    LayoutNode(nodeProps)
+    const initialRootForItems = renderedForItems.at(-1)
+    const innerSplitKey = initialRootForItems?.[1]
+    if (innerSplitKey === undefined) throw new Error("Inner split is missing from the root layout")
+
+    Pane({
+      model: innerLeft,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady,
+      onPtyCleanup: () => {},
+      cols: 80,
+      rows: 24,
+    })
+    await settlePromises()
+    const originalPtyId = ptyIds.get(innerLeft.id)
+    if (!originalPtyId) throw new Error("Inner-left PTY was not spawned")
+
+    await layout.closePane(innerRight.id)
+
+    const updatedInnerSplit = layout.model().children?.[1]
+    if (!updatedInnerSplit?.children) throw new Error("Nested split was removed")
+    expect(updatedInnerSplit.children).toEqual([innerLeft])
+
+    renderedNodes.length = 0
+    renderedForItems.length = 0
+    LayoutNode(nodeProps)
+    const updatedRootForItems = renderedForItems.at(-1)
+    if (!updatedRootForItems?.includes(innerSplitKey)) {
+      const updatedInnerLeft = updatedInnerSplit.children[0]
+      if (updatedInnerLeft === undefined) throw new Error("Inner-left pane was removed")
+      Pane({
+        model: updatedInnerLeft,
+        ptyManager,
+        focused: false,
+        onFocus: () => {},
+        onPtyReady,
+        onPtyCleanup: () => {},
+        cols: 80,
+        rows: 24,
+      })
+      await settlePromises()
+    }
+
+    expect(ptyIds.get(innerLeft.id)).toBe(originalPtyId)
   })
 })

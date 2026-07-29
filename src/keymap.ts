@@ -93,11 +93,19 @@ function collectLeaves(root: PaneModel): PaneModel[] {
 }
 
 export function removeLeaf(root: PaneModel, targetId: string): PaneModel | undefined {
-  if (!root.children) return root.id === targetId ? undefined : root
+  const target = findPane(root, targetId)
+  if (target === undefined || target.children !== undefined) return root
+
+  return removeNode(root, targetId)
+}
+
+function removeNode(root: PaneModel, targetId: string): PaneModel | undefined {
+  if (root.id === targetId) return undefined
+  if (!root.children) return root
 
   let nextChildren: PaneModel[] | undefined
   for (const [index, child] of root.children.entries()) {
-    const nextChild = removeLeaf(child, targetId)
+    const nextChild = removeNode(child, targetId)
     if (nextChild === child) {
       if (nextChildren !== undefined) nextChildren.push(child)
       continue
@@ -106,9 +114,9 @@ export function removeLeaf(root: PaneModel, targetId: string): PaneModel | undef
     nextChildren ??= root.children.slice(0, index)
     if (nextChild !== undefined) nextChildren.push(nextChild)
   }
+
   if (nextChildren === undefined) return root
   if (nextChildren.length === 0) return undefined
-  if (nextChildren.length === 1) return { ...root, children: [nextChildren[0]] }
   return { ...root, children: nextChildren }
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { closePane, findPane, nextLeaf, prevLeaf, splitPane } from "../src/keymap"
+import { closePane, findPane, nextLeaf, prevLeaf, removeLeaf, splitPane } from "../src/keymap"
 import type { PaneModel } from "../src/types"
 
 describe("keymap helpers", () => {
@@ -61,5 +61,17 @@ describe("keymap helpers", () => {
     expect(nextLeaf(tree, "right")).toBe("left")
     expect(prevLeaf(tree, "middle")).toBe("left")
     expect(prevLeaf(tree, "left")).toBe("right")
+  })
+
+  test("preserves the root reference when deleting a pane in a different subtree", () => {
+    const subtree = {
+      id: "left-split",
+      direction: "vertical" as const,
+      children: [{ id: "left", ptyOptions: { command: "bash", args: [] } }],
+    } satisfies PaneModel
+
+    const next = removeLeaf(subtree, "inner-right")
+
+    expect(next).toBe(subtree)
   })
 })

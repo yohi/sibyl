@@ -143,10 +143,14 @@ export function LayoutNode(props: LayoutNodeProps) {
           width={props.isRoot ? "100%" : undefined}
           height={props.isRoot ? "100%" : undefined}
         >
-          <For each={children()}>
-            {(child) => (
+          <For each={children().map((child) => child.id)}>
+            {(childId) => (
               <LayoutNode
-                model={() => child}
+                model={() => {
+                  const child = findPane(props.model(), childId)
+                  if (child === undefined) throw new Error(`Pane ${childId} is missing`)
+                  return child
+                }}
                 ptyManager={props.ptyManager}
                 focusedId={props.focusedId}
                 onFocus={props.onFocus}
