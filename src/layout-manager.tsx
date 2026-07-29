@@ -27,15 +27,16 @@ export interface LayoutManagerController {
   readonly focusNext: () => void;
   readonly focusPrev: () => void;
   readonly onPtyReady: (paneId: PaneId, ptyId: PtyId) => Promise<void>;
+  readonly onPtyCleanup: (paneId: PaneId, ptyId: PtyId) => Promise<void>;
   readonly focusPane: (paneId: PaneId) => void;
 }
-
 export function createLayoutManagerController(
-  _ptyManager: Pick<PtyManager, "terminate">,
+  ptyManager: Pick<PtyManager, "terminate">,
   initialModel: PaneModel,
 ) {
   const [model, setModel] = createSignal(initialModel);
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel));
+  const ptyIdByPane = new Map<PaneId, PtyId>();
 
   const splitPane = (direction: SplitDirection, newPtyOptions: PtyOptions) => {
     const focused = focusedId();
@@ -51,6 +52,7 @@ export function createLayoutManagerController(
     const target = findPane(model(), id);
     if (target === undefined || target.children !== undefined) return;
 
+    const ptyId = ptyIdByPane.get(id);
     let focusCandidate: PaneId | undefined;
     setModel((current) => {
       focusCandidate = nextLeaf(current, id);
@@ -63,6 +65,11 @@ export function createLayoutManagerController(
         ? focusCandidate
         : firstLeafId(current),
     );
+
+    if (ptyId !== undefined) {
+      ptyIdByPane.delete(id);
+      await ptyManager.terminate(ptyId);
+    }
   };
 
   const focusNext = () => {
@@ -75,7 +82,15 @@ export function createLayoutManagerController(
     if (focused !== undefined) setFocusedId(prevLeaf(model(), focused));
   };
 
-  const onPtyReady = async (_paneId: PaneId, _ptyId: PtyId): Promise<void> => {};
+  const onPtyReady = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
+    ptyIdByPane.set(paneId, ptyId);
+  };
+
+  const onPtyCleanup = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
+    if (ptyIdByPane.get(paneId) !== ptyId) return;
+    ptyIdByPane.delete(paneId);
+    await ptyManager.terminate(ptyId);
+  };
 
   return {
     model,
@@ -85,16 +100,13 @@ export function createLayoutManagerController(
     focusNext,
     focusPrev,
     onPtyReady,
+    onPtyCleanup,
     focusPane: setFocusedId,
   };
 }
 
 export function LayoutManager(props: LayoutManagerProps) {
-  const { model, focusedId, onPtyReady, focusPane } = props.controller;
-  const onPtyCleanup = (paneId: PaneId, ptyId: PtyId) => {
-    if (findPane(model(), paneId) !== undefined) return;
-    void props.ptyManager.terminate(ptyId);
-  };
+  const { model, focusedId, onPtyReady, onPtyCleanup, focusPane } = props.controller;
 
   return (
     <LayoutNode

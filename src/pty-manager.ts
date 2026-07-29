@@ -21,6 +21,8 @@ export class PtyManager {
     PtyId,
     Set<(event: { exitCode: number; signal?: number }) => void>
   >();
+  private pendingData = new Map<PtyId, string[]>();
+  private pendingExit = new Map<PtyId, { exitCode: number; signal?: number } | undefined>();
   private exited = new Set<PtyId>();
   private idCounter = 0;
   private nodePtyModule?: Promise<PtyModule>;
@@ -53,12 +55,12 @@ export class PtyManager {
     // Pane コンポーネントは spawn() 解決後に onData/onExit を登録する
     // 可能性があるため、バッファをリプレイしないと起動直後の出力や
     // 即時終了が見逃される。
-    const pendingData: string[] = [];
-    let pendingExit: { exitCode: number; signal?: number } | undefined;
+    this.pendingData.set(id, []);
+    this.pendingExit.set(id, undefined);
 
     const dataSub = terminal.onData((data) => {
       if (!this.exited.has(id)) {
-        pendingData.push(data);
+        this.pendingData.get(id)?.push(data);
         this.emitData(id, data);
       }
     });
@@ -66,14 +68,14 @@ export class PtyManager {
 
     const exitSub = terminal.onExit((event) => {
       this.exited.add(id);
-      pendingExit = event;
+      this.pendingExit.set(id, event);
       this.emitExit(id, event);
     });
     this.exitSubscriptions.set(id, exitSub);
 
     // 購読登録時にバッファをリプレイしてから通常の購読フローを開始する。
     const handle = this.createHandle(id, terminal);
-    return this.withReplay(id, handle, pendingData, pendingExit);
+    return this.withReplay(id, handle);
   }
 
   async terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
@@ -180,12 +182,7 @@ export class PtyManager {
     };
   }
 
-  private withReplay(
-    id: PtyId,
-    handle: PtyHandle,
-    pendingData: string[],
-    pendingExit: { exitCode: number; signal?: number } | undefined,
-  ): PtyHandle {
+  private withReplay(id: PtyId, handle: PtyHandle): PtyHandle {
     const originalOnData = handle.onData.bind(handle);
     const originalOnExit = handle.onExit.bind(handle);
     const dataReplayedCallbacks = new Set<(data: string) => void>();
@@ -198,7 +195,10 @@ export class PtyManager {
         }
         if (!dataReplayedCallbacks.has(callback)) {
           dataReplayedCallbacks.add(callback);
-          for (const data of pendingData) callback(data);
+          const buffer = this.pendingData.get(id);
+          if (buffer !== undefined) {
+            for (const data of buffer) callback(data);
+          }
         }
         return originalOnData(callback);
       },
@@ -208,7 +208,8 @@ export class PtyManager {
         }
         if (!exitReplayedCallbacks.has(callback)) {
           exitReplayedCallbacks.add(callback);
-          if (pendingExit) callback(pendingExit);
+          const event = this.pendingExit.get(id);
+          if (event !== undefined) callback(event);
         }
         return originalOnExit(callback);
       },
@@ -223,6 +224,8 @@ export class PtyManager {
     this.dataCallbacks.delete(id);
     this.exitCallbacks.delete(id);
     this.terminals.delete(id);
+    this.pendingData.delete(id);
+    this.pendingExit.delete(id);
     this.exited.delete(id);
   }
 

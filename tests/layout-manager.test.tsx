@@ -217,7 +217,7 @@ describe("LayoutManager", () => {
     expect(firstLeafId(nestedModel)).toBe("pane-a");
   });
 
-  test("removes a nested leaf without terminating its PTY from the controller", async () => {
+  test("terminates the closed pane PTY through the controller", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager");
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(ptyManager, nestedModel);
@@ -226,7 +226,7 @@ describe("LayoutManager", () => {
     await layout.onPtyReady("pane-b", pty.id);
     await layout.closePane("pane-b");
 
-    expect(ptyManager.terminatedIds).toEqual([]);
+    expect(ptyManager.terminatedIds).toEqual([pty.id]);
     expect(layout.model()).toEqual({
       id: "root",
       direction: "horizontal",
@@ -242,7 +242,7 @@ describe("LayoutManager", () => {
     expect(layout.focusedId()).toBe("pane-c");
   });
 
-  test("preserves an untouched branch without terminating PTYs from the controller", async () => {
+  test("terminates the closed pane PTY while preserving untouched branches", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager");
     const model = {
       id: "root",
@@ -273,7 +273,7 @@ describe("LayoutManager", () => {
 
     await layout.closePane("pane-c");
 
-    expect(ptyManager.terminatedIds).toEqual([]);
+    expect(ptyManager.terminatedIds).toEqual([paneCPty.id]);
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount);
     expect(layout.model()).toEqual({
       id: "root",
@@ -429,7 +429,7 @@ describe("LayoutManager", () => {
     expect(layout.focusedId()).toBe(siblingModel.id);
     replacementPaneCleanup();
     await closing;
-    expect(terminatedPtyIds).toEqual(["pty-original", "pty-replacement"]);
+    expect(terminatedPtyIds).toEqual(["pty-original", "pty-replacement", "pty-replacement"]);
     expect(terminatedPtyIds).not.toContain("pty-sibling");
     finishTermination.resolve();
     await settlePromises();
@@ -496,8 +496,7 @@ describe("LayoutManager", () => {
     closingPaneCleanup();
     survivingPaneCleanup();
 
-    expect(ptyManager.terminatedIds).toEqual([closingPtyId]);
-    expect(ptyManager.terminatedIds).not.toContain(survivingPtyId);
+    expect(ptyManager.terminatedIds).toEqual([closingPtyId, survivingPtyId]);
     expect(ptyManager.spawnedOptions).toHaveLength(2);
   });
 
