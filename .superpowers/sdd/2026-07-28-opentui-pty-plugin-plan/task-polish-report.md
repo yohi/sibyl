@@ -46,3 +46,23 @@ DONE
 ### Concerns
 
 - LSP診断は2ファイルとも3秒の待機時間超過となったが、`bun run typecheck` は成功している。
+
+## Test entrypoint regression coverage (2026-07-29)
+
+### Status
+
+DONE
+
+### Commits
+
+- `fix: ビルド済みサーバー安全エントリーポイントを回帰テスト`
+
+### Verification output
+
+- `bun run build`: 成功。`dist/index.js`、`dist/server.js`、`dist/tui.js`を生成。
+- `bun test tests/index.test.ts`: 成功。1 test passed、0 failed、1 expect call。
+- `bun run lint && bun run typecheck`: 成功。Biomeは25ファイルを検査し、TypeScriptエラーなし。
+
+### Concerns
+
+- `PaneBackend` は型専用 export のため、ランタイムの `dist/index.js` export 一覧には含まれません。テストでは実行時に存在する `OpenTuiPaneBackend` とその他のコア export を検証しています。
