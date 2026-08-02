@@ -1803,4 +1803,4 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
 
 - `PtyManager` の `emitData` / `emitExit` は Task 3 で `Map<PtyId, Set<callback>>` による複数 handle・複数購読者対応を実装する。
 - `node-pty` の Bun 互換性は CI（Task 11）で検証する。
-- `LayoutManager` の `ptyIdByPane`（`paneId -> ptyId` の追跡マップ）には、分割操作時にレースが起こり得る懸念が自己レビューで見つかっている: 置換後ペインの PTY spawn が先に完了して `ptyIdByPane` を更新した後に、unmount 済みの旧ペインの PTY spawn が遅れて完了すると `onPtyReady` が上書きし、現行 PTY の追跡が失われる可能性がある。2026-07-29 に `pendingCleanup` Set 方式での修正を試みたが、`closePane` の直接 terminate と `Pane` の `onCleanup` 経由 terminate の責務分離が既存テスト（`terminates the closed pane PTY through the controller` 等）の前提と衝突し、実装を完了できずに未コミット差分を破棄して commit `80dc44c`（全11テストpass）に復帰した。再着手する場合は、まず当該レースを再現する失敗テストを追加してから設計すること。
+- `LayoutManager` の `ptyIdByPane`（`paneId -> ptyId` の追跡マップ）のレース条件について、`Pane.onMount` で `disposed` ガードを追加し（`5880255`）、さらに `createLayoutManagerController.onPtyReady` でペインのモデル存在確認を追加、`onPtyCleanup` で `terminatedPtyIds` セットによる重複防止と孤児 PTY のクリーンアップを実施済み（回帰テスト追加）。

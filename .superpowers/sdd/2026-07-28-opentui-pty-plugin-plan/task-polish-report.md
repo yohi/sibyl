@@ -22,7 +22,7 @@ DONE
 
 ## Concerns
 
-- Bun実行時は `loadBunPtyAdapter` 未指定の場合に明示的なエラーを投げるため、Bun用アダプターが提供されるまで node-pty の自動ロードは行われません。
+- Bun実行時は `loadBunPtyAdapter` 未指定であっても、POSIX 環境では組み込みの Bun PTY アダプターを自動ロードします。Bun on Windows のみアダプター未指定時に明示的なエラーを投げます。
 - レポート作成時点で作業ツリーはクリーンです。
 
 ## Critical issue fix (2026-07-29)
