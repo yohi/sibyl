@@ -2,7 +2,7 @@
 
 ## コンポーネント
 
-- `PtyManager`: `node-pty` プロセスの起動・終了・リサイズ。
+`PtyManager`: PTY アダプターによるプロセスの起動・終了・リサイズ（`node-pty` および Bun 内蔵 POSIX PTY に対応）。
 - `LayoutManager`: 再帰的な Flexbox ペインレイアウト。
 - `Pane`: 1 つのペインを表す Solid コンポーネント。
 - `PaneBackend`: OpenTUI 実装と外部アダプターのための抽象。
