@@ -165,27 +165,25 @@ describe("PtyManager", () => {
 
   if (process.versions.bun !== undefined) {
     test("uses the external PTY loader on Bun for Windows", async () => {
-      const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
-      if (platformDescriptor === undefined) {
-        throw new Error("Process platform descriptor is unavailable");
-      }
-      Object.defineProperty(process, "platform", { value: "win32" });
-      try {
-        const fakePty = new FakePty();
-        let loaderCalls = 0;
-        const externalPty = { spawn: (): IPty => fakePty };
-        const manager = new PtyManager(undefined, async () => {
+      // Given
+      const fakePty = new FakePty();
+      let loaderCalls = 0;
+      const externalPty = { spawn: (): IPty => fakePty };
+      const manager = new PtyManager(
+        undefined,
+        async () => {
           loaderCalls += 1;
           return externalPty;
-        });
+        },
+        () => "win32",
+      );
 
-        const pty = await manager.spawn({ command: "fake-shell", args: [] });
+      // When
+      const pty = await manager.spawn({ command: "fake-shell", args: [] });
 
-        expect(loaderCalls).toBe(1);
-        await manager.terminate(pty.id);
-      } finally {
-        Object.defineProperty(process, "platform", platformDescriptor);
-      }
+      // Then
+      expect(loaderCalls).toBe(1);
+      await manager.terminate(pty.id);
     });
 
     test("uses the built-in Bun PTY adapter when no adapter is injected", async () => {

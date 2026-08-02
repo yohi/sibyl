@@ -1,6 +1,14 @@
 import type { IPty } from "node-pty";
 import type { PtyId } from "./pty-manager.js";
 
+export interface PtyDescendantController {
+  isTracking(id: PtyId): boolean;
+  knownPids(id: PtyId): readonly number[];
+  activePids(id: PtyId): Promise<readonly number[]>;
+  waitForExit(id: PtyId, timeoutMs: number): Promise<boolean>;
+  stop(id: PtyId): void;
+}
+
 export class PtyTerminationTimeoutError extends Error {
   constructor(ptyId: PtyId) {
     super(`PTY ${ptyId} did not exit after SIGKILL`);
@@ -12,8 +20,9 @@ export class PtyTerminator {
   private readonly terminating = new Map<PtyId, Promise<void>>();
   private exitFallbackRegistered = false;
   private readonly terminateOnProcessExit = () => {
-    for (const terminal of this.terminals.values()) {
+    for (const [id, terminal] of this.terminals) {
       this.killTerminal(terminal, process.platform === "win32" ? undefined : "SIGKILL");
+      this.killDescendants(this.descendants?.knownPids(id) ?? [], "SIGKILL");
     }
   };
 
@@ -21,6 +30,7 @@ export class PtyTerminator {
     private readonly terminals: Map<PtyId, IPty>,
     private readonly exited: Set<PtyId>,
     private readonly dispose: (id: PtyId) => void,
+    private readonly descendants?: PtyDescendantController,
   ) {}
 
   registerExitFallback(): void {
@@ -60,6 +70,7 @@ export class PtyTerminator {
     }
 
     let exited = false;
+    let forceDisposed = false;
     let resolveExit = () => {};
     const exitPromise = new Promise<void>((resolve) => {
       resolveExit = resolve;
@@ -75,11 +86,13 @@ export class PtyTerminator {
       exitListener?.dispose();
       resolveExit();
       await exitPromise;
+      await this.terminateDescendants(id, gracefulTimeoutMs);
       this.dispose(id);
       return;
     }
 
     const waitForExit = async (): Promise<boolean> => {
+      if (this.exited.has(id)) return true;
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         return await Promise.race([
@@ -98,17 +111,26 @@ export class PtyTerminator {
         this.killTerminal(terminal);
         if (!(await waitForExit())) throw new PtyTerminationTimeoutError(id);
       } else {
+        const activeDescendants = this.descendants?.isTracking(id)
+          ? await this.descendants.activePids(id)
+          : [];
         this.killTerminal(terminal, "SIGTERM");
-        if (!(await waitForExit())) {
+        let terminatedDescendants = false;
+        if (activeDescendants.length > 0) {
+          this.killDescendants(activeDescendants, "SIGTERM");
+          terminatedDescendants = await this.terminateDescendants(id, gracefulTimeoutMs);
+        }
+        if (terminatedDescendants) {
+          this.killTerminal(terminal, "SIGKILL");
+          forceDisposed = true;
+        } else if (!(await waitForExit())) {
           this.killTerminal(terminal, "SIGKILL");
           if (!(await waitForExit())) throw new PtyTerminationTimeoutError(id);
         }
       }
-    } catch (error) {
-      if (!this.exited.has(id)) throw error;
     } finally {
       exitListener?.dispose();
-      if (exited || this.exited.has(id)) this.dispose(id);
+      if (forceDisposed || exited || this.exited.has(id)) this.dispose(id);
     }
   }
 
@@ -120,12 +142,41 @@ export class PtyTerminator {
 
     try {
       process.kill(-terminal.pid, signal);
+      terminal.kill(signal);
     } catch (error) {
       if (error instanceof Error) {
         terminal.kill(signal);
         return;
       }
       throw error;
+    }
+  }
+
+  private async terminateDescendants(id: PtyId, gracefulTimeoutMs: number): Promise<boolean> {
+    const descendants = this.descendants;
+    if (descendants === undefined || process.platform === "win32") return false;
+
+    const activePids = await descendants.activePids(id);
+    if (activePids.length === 0) return false;
+
+    this.killDescendants(activePids, "SIGTERM");
+    if (await descendants.waitForExit(id, gracefulTimeoutMs)) return true;
+
+    this.killDescendants(await descendants.activePids(id), "SIGKILL");
+    if (!(await descendants.waitForExit(id, gracefulTimeoutMs))) {
+      throw new PtyTerminationTimeoutError(id);
+    }
+    return true;
+  }
+
+  private killDescendants(pids: readonly number[], signal: "SIGTERM" | "SIGKILL"): void {
+    if (process.platform === "win32") return;
+    for (const pid of pids) {
+      try {
+        process.kill(pid, signal);
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+      }
     }
   }
 }

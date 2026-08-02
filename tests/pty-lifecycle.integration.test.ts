@@ -1,13 +1,13 @@
 import { expect, test } from "bun:test";
 import { PtyManager } from "../src/pty-manager";
 
-test("terminates a descendant after its PTY leader exits", async () => {
+test("terminates a detached descendant when terminating its PTY", async () => {
   if (process.platform === "win32") return;
 
   const manager = new PtyManager();
   const pty = await manager.spawn({
     command: "sh",
-    args: ["-c", "sh -c 'trap \"\" HUP TERM; sleep 30' & echo CHILD:$!"],
+    args: ["-c", "setsid sh -c 'trap \"\" HUP TERM; echo CHILD:$$; sleep 30' & sleep 0.2"],
   });
   const childPid = await new Promise<number>((resolve, reject) => {
     let output = "";
@@ -21,11 +21,7 @@ test("terminates a descendant after its PTY leader exits", async () => {
       }
     });
   });
-  await new Promise<void>((resolve) => {
-    pty.onExit(() => resolve());
-  });
-
-  await manager.terminate(pty.id, 10);
+  await manager.terminate(pty.id);
 
   let childAlive = false;
   try {

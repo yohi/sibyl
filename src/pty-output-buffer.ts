@@ -5,6 +5,24 @@ function findIncompleteEscapeStart(text: string): number | undefined {
 
   while (cursor < text.length) {
     const start = text.indexOf("\x1b", cursor);
+    const c1Start = ["\x9d", "\x90", "\x98", "\x9e", "\x9f"]
+      .map((control) => text.indexOf(control, cursor))
+      .filter((index) => index !== -1)
+      .reduce<number | undefined>(
+        (first, index) => (first === undefined ? index : Math.min(first, index)),
+        undefined,
+      );
+    if (c1Start !== undefined && (start === -1 || c1Start < start)) {
+      const kind = text[c1Start];
+      const bel = text.indexOf("\x07", c1Start + 1);
+      const stringTerminator = text.indexOf("\x9c", c1Start + 1);
+      if (stringTerminator === -1 && (kind !== "\x9d" || bel === -1)) return c1Start;
+      cursor = Math.min(
+        kind === "\x9d" && bel !== -1 ? bel + 1 : Number.POSITIVE_INFINITY,
+        stringTerminator === -1 ? Number.POSITIVE_INFINITY : stringTerminator + 1,
+      );
+      continue;
+    }
     if (start === -1) return undefined;
 
     const kind = text[start + 1];

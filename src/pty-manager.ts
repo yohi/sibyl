@@ -1,4 +1,5 @@
 import type { IPty } from "node-pty";
+import { PtyProcessTracker } from "./pty-process-tracker.js";
 import { PtyTerminator } from "./pty-terminator.js";
 import type { PtyOptions } from "./types.js";
 
@@ -27,13 +28,18 @@ export class PtyManager {
   private exited = new Set<PtyId>();
   private idCounter = 0;
   private nodePtyModule?: Promise<PtyModule>;
-  private readonly terminator = new PtyTerminator(this.terminals, this.exited, (id) =>
-    this.dispose(id),
+  private readonly processTracker = new PtyProcessTracker();
+  private readonly terminator = new PtyTerminator(
+    this.terminals,
+    this.exited,
+    (id) => this.dispose(id),
+    this.processTracker,
   );
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
     private readonly loadNodePty: () => Promise<PtyModule> = () => import("node-pty"),
+    private readonly getPlatform: () => NodeJS.Platform = () => process.platform,
   ) {}
 
   async spawn(options: PtyOptions): Promise<PtyHandle> {
@@ -53,6 +59,7 @@ export class PtyManager {
     });
 
     this.terminals.set(id, terminal);
+    this.processTracker.start(id, terminal.pid);
     this.terminator.registerExitFallback();
 
     // 新しい購読者が登録される前に発生したデータ/終了イベントを
@@ -87,7 +94,7 @@ export class PtyManager {
       this.pendingExit.set(id, event);
       const hadExitSubscribers = (this.exitCallbacks.get(id)?.size ?? 0) > 0;
       this.emitExit(id, event);
-      if (hadExitSubscribers) this.dispose(id);
+      if (hadExitSubscribers) void this.disposeExitedPtyIfNoDescendants(id);
     });
     this.exitSubscriptions.set(id, exitSub);
 
@@ -187,7 +194,7 @@ export class PtyManager {
           const event = this.pendingExit.get(id);
           if (event !== undefined) {
             callback(event);
-            this.dispose(id);
+            void this.disposeExitedPtyIfNoDescendants(id);
             return () => {};
           }
         }
@@ -207,7 +214,14 @@ export class PtyManager {
     this.pendingData.delete(id);
     this.pendingExit.delete(id);
     this.exited.delete(id);
+    this.processTracker.stop(id);
     this.terminator.unregisterExitFallbackWhenIdle();
+  }
+
+  private async disposeExitedPtyIfNoDescendants(id: PtyId): Promise<void> {
+    if ((await this.processTracker.activePids(id)).length === 0 && this.exited.has(id)) {
+      this.dispose(id);
+    }
   }
 
   private async loadPtyModule(): Promise<PtyModule> {
@@ -215,7 +229,7 @@ export class PtyManager {
       if (this.loadBunPtyAdapter) {
         return this.loadBunPtyAdapter();
       }
-      if (process.platform === "win32") {
+      if (this.getPlatform() === "win32") {
         return this.loadExternalPtyModule();
       }
       const { createBunPtyAdapter } = await import("./bun-pty-adapter.js");

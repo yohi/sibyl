@@ -51,6 +51,18 @@ describe("PtyOutputBuffer", () => {
     expect(output.text()).toBe("beforeafter\n");
   });
 
+  test("removes a split 8-bit C1 string control", () => {
+    // Given
+    const output = new PtyOutputBuffer(1_000);
+
+    // When
+    output.append("before\u0090private");
+    output.append(" payload\u009cafter\n");
+
+    // Then
+    expect(output.text()).toBe("beforeafter\n");
+  });
+
   test("updates the display buffer within one frame for 1,000 PTY chunks", () => {
     const output = new PtyOutputBuffer(1_000);
     const startedAt = performance.now();
