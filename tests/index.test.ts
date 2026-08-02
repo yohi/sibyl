@@ -73,12 +73,88 @@ await createTuiPlugin(ptyManager)({
 const setup = await testRender(route.render, { width: 40, height: 8 });
 await setup.renderOnce();
 await Promise.resolve();
+const outputStartedAt = performance.now();
 for (const callback of dataCallbacks) callback("sibyl-output\\n");
 await setup.renderOnce();
 const frame = setup.captureCharFrame();
 setup.renderer.destroy();
 await Promise.resolve();
-if (!frame.includes("sibyl-output") || terminated.join(",") !== "pty-1") process.exit(1);`,
+if (!frame.includes("sibyl-output") || performance.now() - outputStartedAt >= 16 || terminated.join(",") !== "pty-1") process.exit(1);`,
+      ],
+      {
+        cwd: process.cwd(),
+        stderr: "pipe",
+      },
+    );
+
+    expect(await child.exited).toBe(0);
+    expect(await new Response(child.stderr).text()).toBe("");
+  });
+
+  test("keeps the surviving PTY session when closing a sibling", async () => {
+    const child = Bun.spawn(
+      [
+        "bun",
+        "--preload",
+        "@opentui/solid/preload",
+        "-e",
+        `import "@opentui/solid/runtime-plugin-support";
+import { testRender } from "@opentui/solid";
+const { createTuiPlugin } = await import("./dist/tui.js");
+let nextPtyId = 0;
+const terminated = [];
+const exitCallbacks = new Map();
+const ptyManager = {
+  async spawn() {
+    const id = \`pty-\${++nextPtyId}\`;
+    const callbacks = new Set();
+    exitCallbacks.set(id, callbacks);
+    return {
+      id,
+      write() {},
+      resize() {},
+      onData() { return () => {}; },
+      onExit(callback) { callbacks.add(callback); return () => callbacks.delete(callback); },
+    };
+  },
+  async terminate(id) {
+    terminated.push(id);
+    for (const callback of exitCallbacks.get(id) ?? []) callback({ exitCode: 0 });
+    exitCallbacks.delete(id);
+  },
+  async terminateAll() {},
+};
+let route;
+let layer;
+await createTuiPlugin(ptyManager)({
+  route: { register(routes) { route = routes[0]; return () => {}; }, navigate() {} },
+  keymap: { registerLayer(value) { layer = value; return () => {}; } },
+  lifecycle: { onDispose() { return () => {}; } },
+});
+const setup = await testRender(() => route.render({}), { width: 80, height: 24 });
+try {
+  const render = async () => {
+    await setup.renderOnce();
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  const run = (name) => {
+    const command = layer.commands.find((candidate) => candidate.name === name);
+    if (!command) throw new Error(\`Missing command: \${name}\`);
+    return command.run();
+  };
+  await render();
+  await run("sibyl.split.horizontal");
+  await render();
+  if (nextPtyId !== 3) throw new Error(\`Expected 3 PTY spawns after split, received \${nextPtyId}\`);
+  await run("sibyl.close");
+  await render();
+  if (nextPtyId !== 3) throw new Error(\`Surviving pane respawned: \${nextPtyId} PTY spawns\`);
+  if (terminated.join(",") !== "pty-1,pty-2") throw new Error(\`Unexpected terminated PTYs: \${terminated}\`);
+} finally {
+  setup.renderer.destroy();
+  await Promise.resolve();
+}`,
       ],
       {
         cwd: process.cwd(),

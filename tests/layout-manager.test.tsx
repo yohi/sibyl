@@ -300,8 +300,11 @@ describe("LayoutManager", () => {
     expect(layout.model().children?.map((child) => child.id)).toEqual(["left", "right"]);
     termination.resolve();
     await closing;
-    expect(layout.model().id).toBe("right");
-    expect(layout.model().children).toBeUndefined();
+    expect(layout.model()).toEqual({
+      id: "root",
+      direction: "horizontal",
+      children: [{ id: "right", ptyOptions: { command: "fake-shell", args: [] } }],
+    });
   });
 
   test("creates split panes through the configured pane backend", async () => {
@@ -349,7 +352,11 @@ describe("LayoutManager", () => {
       direction: "horizontal",
       children: [
         { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-        { id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } },
+        {
+          id: "right-split",
+          direction: "vertical",
+          children: [{ id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } }],
+        },
       ],
     });
     expect(layout.focusedId()).toBe("pane-c");
@@ -427,7 +434,11 @@ describe("LayoutManager", () => {
 
     expect(ptyManager.terminatedIds).toEqual([paneCPty.id]);
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount);
-    expect(layout.model()).toBe(untouchedBranch);
+    expect(layout.model()).toEqual({
+      id: "root",
+      direction: "horizontal",
+      children: [untouchedBranch],
+    });
   });
 
   test("terminates the original PTY when it resolves after its pane unmounts during a split", async () => {
@@ -566,7 +577,7 @@ describe("LayoutManager", () => {
     expect(collectPaneIds(layout.model())).toContain(siblingModel.id);
     replacementPaneCleanup();
     await closing;
-    expect(collectPaneIds(layout.model())).toEqual([siblingModel.id]);
+    expect(collectPaneIds(layout.model())).toEqual([layout.model().id, siblingModel.id]);
     expect(layout.focusedId()).toBe(siblingModel.id);
     expect(terminatedPtyIds).toEqual(["pty-original", "pty-replacement", "pty-replacement"]);
     expect(terminatedPtyIds).not.toContain("pty-sibling");
@@ -751,14 +762,17 @@ describe("LayoutManager", () => {
 
     await layout.closePane(innerRight.id);
 
-    // After flattening, inner-split is replaced by innerLeft.
-    expect(layout.model().children?.[1]).toBe(innerLeft);
+    expect(layout.model().children?.[1]).toEqual({
+      id: innerSplit.id,
+      direction: innerSplit.direction,
+      children: [innerLeft],
+    });
 
     renderedNodes.length = 0;
     renderedForItems.length = 0;
     LayoutNode(nodeProps);
     const updatedRootForItems = renderedForItems.at(-1);
-    expect(updatedRootForItems).toEqual([outerLeft.id, innerLeft.id]);
+    expect(updatedRootForItems).toEqual([outerLeft.id, innerSplit.id]);
 
     Pane({
       model: innerLeft,
