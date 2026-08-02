@@ -115,11 +115,16 @@ export class PtyManager {
       return;
     }
 
-    const timer = setTimeout(resolveExit, gracefulTimeoutMs);
-
+    const timer = setTimeout(() => {
+      this.exited.add(id);
+      resolveExit();
+    }, gracefulTimeoutMs);
     try {
       if (process.platform === "win32") {
         terminal.kill();
+
+        // node-pty の kill() 後に onExit が来ない場合でもタイマーで解決する。
+        await exitPromise;
       } else {
         terminal.kill("SIGTERM");
 
@@ -134,10 +139,13 @@ export class PtyManager {
       }
     } catch {
       // terminal.kill may throw for already-exited processes
+      resolveExit();
+    } finally {
+      clearTimeout(timer);
     }
 
+    // exitPromise は常に resolve される（タイマーか exit のどちらか）。
     await exitPromise;
-    clearTimeout(timer);
     this.dispose(id);
   }
 

@@ -37,7 +37,7 @@ export function createLayoutManagerController(
   const [model, setModel] = createSignal(initialModel);
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel));
   const ptyIdByPane = new Map<PaneId, PtyId>();
-
+  const terminatedPtyIds = new Set<PtyId>();
   const splitPane = (direction: SplitDirection, newPtyOptions: PtyOptions) => {
     const focused = focusedId();
     if (focused === undefined) return;
@@ -68,6 +68,7 @@ export function createLayoutManagerController(
 
     if (ptyId !== undefined) {
       ptyIdByPane.delete(id);
+      terminatedPtyIds.add(ptyId);
       await ptyManager.terminate(ptyId);
     }
   };
@@ -83,12 +84,18 @@ export function createLayoutManagerController(
   };
 
   const onPtyReady = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
+    // ペインがモデルから既に削除されている場合、受信した PTY は直ちに終了する。
+    if (!findPane(model(), paneId)) {
+      await ptyManager.terminate(ptyId);
+      return;
+    }
     ptyIdByPane.set(paneId, ptyId);
   };
 
   const onPtyCleanup = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
-    if (ptyIdByPane.get(paneId) !== ptyId) return;
-    ptyIdByPane.delete(paneId);
+    if (ptyIdByPane.get(paneId) === ptyId) ptyIdByPane.delete(paneId);
+    if (terminatedPtyIds.has(ptyId)) return;
+    terminatedPtyIds.add(ptyId);
     await ptyManager.terminate(ptyId);
   };
 
