@@ -115,22 +115,29 @@ export class PtyManager {
       return;
     }
 
-    if (process.platform === "win32") {
-      terminal.kill();
-    } else {
-      terminal.kill("SIGTERM");
+    const timer = setTimeout(resolveExit, gracefulTimeoutMs);
 
-      await Promise.race([
-        exitPromise,
-        new Promise<void>((resolve) => setTimeout(resolve, gracefulTimeoutMs)),
-      ]);
+    try {
+      if (process.platform === "win32") {
+        terminal.kill();
+      } else {
+        terminal.kill("SIGTERM");
 
-      if (!this.exited.has(id)) {
-        terminal.kill("SIGKILL");
+        await Promise.race([
+          exitPromise,
+          new Promise<void>((resolve) => setTimeout(resolve, gracefulTimeoutMs)),
+        ]);
+
+        if (!this.exited.has(id)) {
+          terminal.kill("SIGKILL");
+        }
       }
+    } catch {
+      // terminal.kill may throw for already-exited processes
     }
 
     await exitPromise;
+    clearTimeout(timer);
     this.dispose(id);
   }
 
@@ -254,6 +261,7 @@ export class PtyManager {
       return createBunPtyAdapter();
     }
     this.nodePtyModule ??= this.loadNodePty().catch((error: unknown) => {
+      this.nodePtyModule = undefined;
       throw new Error("No compatible PTY adapter is available", { cause: error });
     });
     return this.nodePtyModule;

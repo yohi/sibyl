@@ -79,7 +79,9 @@ const tui: TuiPlugin = async (api) => {
       { key: "ctrl+a x", cmd: "sibyl.close" },
     ],
   });
-  api.lifecycle.onDispose(() => ptyManager.terminateAll());
+  api.lifecycle.onDispose(() => {
+    void ptyManager.terminateAll().catch(() => {});
+  });
 };
 
 export default {
