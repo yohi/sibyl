@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, jest, test } from "bun:test";
 import type { IEvent, IPty } from "node-pty";
 import { PtyManager } from "../src/pty-manager";
 
@@ -16,6 +16,8 @@ class FakePty implements IPty {
   private readonly exitListeners = new Set<
     (event: { exitCode: number; signal?: number }) => void
   >();
+
+  constructor(private readonly emitsExitOnKill = true) {}
 
   readonly onData: IEvent<string> = (listener) => {
     const isFirstListener = this.dataListeners.size === 0;
@@ -54,6 +56,7 @@ class FakePty implements IPty {
 
   kill(signal?: string): void {
     this.killSignals.push(signal);
+    if (!this.emitsExitOnKill) return;
     for (const listener of [...this.exitListeners]) {
       listener({ exitCode: 0 });
     }
@@ -109,6 +112,29 @@ describe("PtyManager", () => {
     expect(fakePty.writes).toEqual(["echo fake\r"]);
     expect(fakePty.resizes).toEqual([[120, 40]]);
     expect(fakePty.killSignals).toEqual([process.platform === "win32" ? undefined : "SIGTERM"]);
+  });
+
+  test("sends SIGKILL when SIGTERM does not produce an exit event", async () => {
+    if (process.platform === "win32") return;
+
+    jest.useFakeTimers();
+    try {
+      const fakePty = new FakePty(false);
+      const fakeNodePty = { spawn: (): IPty => fakePty };
+      const manager = new PtyManager(
+        async () => fakeNodePty,
+        async () => fakeNodePty,
+      );
+      const pty = await manager.spawn({ command: "fake-shell", args: [] });
+
+      const termination = manager.terminate(pty.id, 10);
+      jest.advanceTimersByTime(10);
+      await termination;
+
+      expect(fakePty.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   if (process.versions.bun !== undefined) {
