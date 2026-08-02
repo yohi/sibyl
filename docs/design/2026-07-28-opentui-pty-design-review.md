@@ -248,3 +248,17 @@ running
 5. 非機能目標の測定起点を定義する。
 
 次工程は、本レビューで確定した方針に基づく**詳細実装計画**の作成である。
+
+## 6. 是正追記（2026-08-03）
+
+- ペイン操作キーは `api.keymap.registerLayer()` の各 binding で
+  `preventDefault: true` を明示する。Keymap が操作キーを消費してから
+  `useKeyboard` のPTY入力ハンドラへ到達するため、操作とシェル入力は混線しない。
+- 最小限表示方式は、CSI/OSCに加えてC0制御文字（改行・タブを除く）と
+  DCS/SOS/PM/APC文字列制御を、チャンク境界をまたいでも表示バッファへ残さず除去する。
+- close後の再帰レイアウト木は、子が1つだけになったsplitノードを残存leafへ縮約する。
+  これは計画時点のtree shapeに合わせた仕様であり、縮約に伴う再マウントで新しいPTYが
+  生成される場合がある。
+- PTY `onData` から描画までの受入条件は、`@opentui/solid` の test rendererを用いて
+  `Pane` の実レンダリング結果を検査する。テストはOpenCode本体と同じ
+  `--conditions=browser` とSolid transform preloadで実行する。

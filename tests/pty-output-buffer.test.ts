@@ -39,6 +39,18 @@ describe("PtyOutputBuffer", () => {
     expect(output.text()).toBe("leftlabelright\n");
   });
 
+  test("removes split string controls and non-rendering C0 controls", () => {
+    // Given
+    const output = new PtyOutputBuffer(1_000);
+
+    // When
+    output.append("before\x1bPprivate\x1b");
+    output.append("\\after\r\b\x07\n");
+
+    // Then
+    expect(output.text()).toBe("beforeafter\n");
+  });
+
   test("updates the display buffer within one frame for 1,000 PTY chunks", () => {
     const output = new PtyOutputBuffer(1_000);
     const startedAt = performance.now();

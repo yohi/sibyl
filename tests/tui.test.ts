@@ -72,6 +72,41 @@ describe("TUI plugin", () => {
     expect(disposeHandlers).toHaveLength(1);
   });
 
+  test("marks pane operation bindings as consumed before PTY input handlers run", async () => {
+    // Given
+    const layers: Array<{
+      bindings?: Array<{ readonly cmd?: string; readonly preventDefault?: boolean }>;
+    }> = [];
+    const api = {
+      route: { register: () => () => {}, navigate: () => {} },
+      keymap: {
+        registerLayer: (layer: {
+          bindings?: Array<{ readonly cmd?: string; readonly preventDefault?: boolean }>;
+        }) => {
+          layers.push(layer);
+          return () => {};
+        },
+      },
+      lifecycle: { onDispose: () => () => {} },
+    };
+
+    // When
+    await Reflect.apply(plugin.tui, undefined, [api, undefined, undefined]);
+
+    // Then
+    const operationCommands = new Set([
+      "sibyl.split.horizontal",
+      "sibyl.split.vertical",
+      "sibyl.focus.next",
+      "sibyl.focus.prev",
+      "sibyl.close",
+    ]);
+    const operationBindings = layers[0]?.bindings?.filter((binding) =>
+      operationCommands.has(binding.cmd ?? ""),
+    );
+    expect(operationBindings?.every((binding) => binding.preventDefault === true)).toBe(true);
+  });
+
   test("returns a dispose handler that awaits PTY termination", async () => {
     // Given
     const tuiModule = await import("../src/tui");

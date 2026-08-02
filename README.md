@@ -13,7 +13,7 @@
 ```bash
 bun install
 bun run build
-bun test
+bun run test
 ```
 
 ## Installation

@@ -10,12 +10,13 @@ function findIncompleteEscapeStart(text: string): number | undefined {
     const kind = text[start + 1];
     if (kind === undefined) return start;
 
-    if (kind === "]") {
+    if (kind === "]" || kind === "P" || kind === "X" || kind === "^" || kind === "_") {
       const bel = text.indexOf("\x07", start + 2);
       const stringTerminator = text.indexOf("\x1b\\", start + 2);
-      if (bel === -1 && stringTerminator === -1) return start;
+      const acceptsBel = kind === "]";
+      if (stringTerminator === -1 && (!acceptsBel || bel === -1)) return start;
       cursor = Math.min(
-        bel === -1 ? Number.POSITIVE_INFINITY : bel + 1,
+        acceptsBel && bel !== -1 ? bel + 1 : Number.POSITIVE_INFINITY,
         stringTerminator === -1 ? Number.POSITIVE_INFINITY : stringTerminator + 2,
       );
       continue;

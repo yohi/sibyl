@@ -21,7 +21,7 @@
   "scripts": {
     "build": "tsc --emitDeclarationOnly && rollup -c",
     "build:types": "tsc --emitDeclarationOnly",
-    "test": "bun test",
+    "test": "bun test && bun test --conditions=browser --preload @opentui/solid/preload ./tests/pane-render.integration.tsx",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",

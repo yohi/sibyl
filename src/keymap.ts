@@ -122,6 +122,7 @@ function removeNode(root: PaneModel, targetId: string): PaneModel | undefined {
 
   if (nextChildren === undefined) return root;
   if (nextChildren.length === 0) return undefined;
+  if (nextChildren.length === 1) return nextChildren[0];
   return { ...root, children: nextChildren };
 }
 

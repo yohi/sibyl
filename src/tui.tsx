@@ -75,12 +75,12 @@ export function createTuiPlugin(
         },
       ],
       bindings: [
-        { key: "ctrl+shift+s", cmd: "sibyl.open" },
-        { key: "ctrl+a h", cmd: "sibyl.split.horizontal" },
-        { key: "ctrl+a v", cmd: "sibyl.split.vertical" },
-        { key: "ctrl+a n", cmd: "sibyl.focus.next" },
-        { key: "ctrl+a p", cmd: "sibyl.focus.prev" },
-        { key: "ctrl+a x", cmd: "sibyl.close" },
+        { key: "ctrl+shift+s", cmd: "sibyl.open", preventDefault: true },
+        { key: "ctrl+a h", cmd: "sibyl.split.horizontal", preventDefault: true },
+        { key: "ctrl+a v", cmd: "sibyl.split.vertical", preventDefault: true },
+        { key: "ctrl+a n", cmd: "sibyl.focus.next", preventDefault: true },
+        { key: "ctrl+a p", cmd: "sibyl.focus.prev", preventDefault: true },
+        { key: "ctrl+a x", cmd: "sibyl.close", preventDefault: true },
       ],
     });
     api.lifecycle.onDispose(() => ptyManager.terminateAll());

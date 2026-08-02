@@ -301,9 +301,8 @@ describe("LayoutManager", () => {
     termination.resolve();
     await closing;
     expect(layout.model()).toEqual({
-      id: "root",
-      direction: "horizontal",
-      children: [{ id: "right", ptyOptions: { command: "fake-shell", args: [] } }],
+      id: "right",
+      ptyOptions: { command: "fake-shell", args: [] },
     });
   });
 
@@ -352,11 +351,7 @@ describe("LayoutManager", () => {
       direction: "horizontal",
       children: [
         { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-        {
-          id: "right-split",
-          direction: "vertical",
-          children: [{ id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } }],
-        },
+        { id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } },
       ],
     });
     expect(layout.focusedId()).toBe("pane-c");
@@ -434,11 +429,7 @@ describe("LayoutManager", () => {
 
     expect(ptyManager.terminatedIds).toEqual([paneCPty.id]);
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount);
-    expect(layout.model()).toEqual({
-      id: "root",
-      direction: "horizontal",
-      children: [untouchedBranch],
-    });
+    expect(layout.model()).toBe(untouchedBranch);
   });
 
   test("terminates the original PTY when it resolves after its pane unmounts during a split", async () => {
@@ -577,7 +568,7 @@ describe("LayoutManager", () => {
     expect(collectPaneIds(layout.model())).toContain(siblingModel.id);
     replacementPaneCleanup();
     await closing;
-    expect(collectPaneIds(layout.model())).toEqual([layout.model().id, siblingModel.id]);
+    expect(collectPaneIds(layout.model())).toEqual([siblingModel.id]);
     expect(layout.focusedId()).toBe(siblingModel.id);
     expect(terminatedPtyIds).toEqual(["pty-original", "pty-replacement", "pty-replacement"]);
     expect(terminatedPtyIds).not.toContain("pty-sibling");
@@ -710,7 +701,7 @@ describe("LayoutManager", () => {
     expect(ptyIds.get(survivingPane.id)).toBe(originalPtyId);
   });
 
-  test("does not respawn inner-left PTY when closing inner-right from a nested split", async () => {
+  test("collapses an inner split when closing its sibling", async () => {
     lifecycle.cleanup = undefined;
     renderedNodes.length = 0;
     renderedForItems.length = 0;
@@ -762,17 +753,13 @@ describe("LayoutManager", () => {
 
     await layout.closePane(innerRight.id);
 
-    expect(layout.model().children?.[1]).toEqual({
-      id: innerSplit.id,
-      direction: innerSplit.direction,
-      children: [innerLeft],
-    });
+    expect(layout.model().children?.[1]).toBe(innerLeft);
 
     renderedNodes.length = 0;
     renderedForItems.length = 0;
     LayoutNode(nodeProps);
     const updatedRootForItems = renderedForItems.at(-1);
-    expect(updatedRootForItems).toEqual([outerLeft.id, innerSplit.id]);
+    expect(updatedRootForItems).toEqual([outerLeft.id, innerLeft.id]);
 
     Pane({
       model: innerLeft,
