@@ -23,6 +23,14 @@ describe("stripAnsi", () => {
     expect(stripAnsi(chunks.join(""))).toBe("beforeafter");
   });
 
+  test("handles many unterminated OSC prefixes without excessive backtracking", () => {
+    const text = "\x1b]0;title".repeat(100_000);
+    const startedAt = performance.now();
+
+    expect(stripAnsi(text)).toBe("0;title".repeat(100_000));
+    expect(performance.now() - startedAt).toBeLessThan(5_000);
+  });
+
   test("keeps plain text", () => {
     expect(stripAnsi("hello")).toBe("hello");
   });
