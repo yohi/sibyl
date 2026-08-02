@@ -244,9 +244,7 @@ describe("LayoutManager", () => {
     const layout = createLayoutManagerController(ptyManager, {
       id: "root",
       direction: "horizontal",
-      children: [
-        { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-      ],
+      children: [{ id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } }],
     });
 
     // Simulate a late onPtyReady call after the pane was closed (stale PTY)
@@ -292,7 +290,6 @@ describe("LayoutManager", () => {
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount);
     expect(layout.model()).toBe(untouchedBranch);
   });
-
 
   test("terminates the original PTY when it resolves after its pane unmounts during a split", async () => {
     // Given
