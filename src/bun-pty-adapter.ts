@@ -1,4 +1,4 @@
-import type { IBasePtyForkOptions, IEvent, IPty } from "node-pty";
+import type { IEvent, IPty } from "node-pty";
 
 type PtyModule = Pick<typeof import("node-pty"), "spawn">;
 
@@ -88,6 +88,7 @@ class BunPty implements IPty {
     this.rows = rows;
   }
 
+  // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   clear(): void {}
 
   write(data: Parameters<IPty["write"]>[0]): void {
@@ -103,7 +104,9 @@ class BunPty implements IPty {
     this.subprocess.terminal?.close();
   }
 
+  // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   pause(): void {}
+  // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   resume(): void {}
 }
 
