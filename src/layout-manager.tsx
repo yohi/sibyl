@@ -33,7 +33,7 @@ export interface LayoutManagerController {
 export function createLayoutManagerController(
   ptyManager: Pick<PtyManager, "terminate">,
   initialModel: PaneModel,
-) {
+): LayoutManagerController {
   const [model, setModel] = createSignal(initialModel);
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel));
   const ptyIdByPane = new Map<PaneId, PtyId>();
@@ -127,7 +127,7 @@ export interface LayoutNodeProps {
   readonly focusedId: () => string | undefined;
   readonly onFocus: (paneId: string) => void;
   readonly onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>;
-  readonly onPtyCleanup: (paneId: PaneId, ptyId: PtyId) => void;
+  readonly onPtyCleanup: (paneId: PaneId, ptyId: PtyId) => Promise<void> | void;
   readonly isRoot?: boolean;
 }
 
@@ -143,8 +143,6 @@ export function LayoutNode(props: LayoutNodeProps) {
           onFocus={() => props.onFocus(props.model().id)}
           onPtyReady={props.onPtyReady}
           onPtyCleanup={(_paneId, ptyId) => props.onPtyCleanup(props.model().id, ptyId)}
-          cols={80}
-          rows={24}
         />
       }
     >
@@ -156,20 +154,20 @@ export function LayoutNode(props: LayoutNodeProps) {
           height={props.isRoot ? "100%" : undefined}
         >
           <For each={children().map((child) => child.id)}>
-            {(childId) => (
-              <LayoutNode
-                model={() => {
-                  const child = findPane(props.model(), childId);
-                  if (child === undefined) throw new Error(`Pane ${childId} is missing`);
-                  return child;
-                }}
-                ptyManager={props.ptyManager}
-                focusedId={props.focusedId}
-                onFocus={props.onFocus}
-                onPtyReady={props.onPtyReady}
-                onPtyCleanup={props.onPtyCleanup}
-              />
-            )}
+            {(childId) => {
+              const childModel = findPane(props.model(), childId);
+              if (childModel === undefined) return null;
+              return (
+                <LayoutNode
+                  model={() => childModel}
+                  ptyManager={props.ptyManager}
+                  focusedId={props.focusedId}
+                  onFocus={props.onFocus}
+                  onPtyReady={props.onPtyReady}
+                  onPtyCleanup={props.onPtyCleanup}
+                />
+              );
+            }}
           </For>
         </box>
       )}

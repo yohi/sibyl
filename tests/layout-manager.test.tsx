@@ -232,11 +232,7 @@ describe("LayoutManager", () => {
       direction: "horizontal",
       children: [
         { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
-        {
-          id: "right-split",
-          direction: "vertical",
-          children: [{ id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } }],
-        },
+        { id: "pane-c", ptyOptions: { command: "fake-shell", args: [] } },
       ],
     });
     expect(layout.focusedId()).toBe("pane-c");
@@ -275,13 +271,9 @@ describe("LayoutManager", () => {
 
     expect(ptyManager.terminatedIds).toEqual([paneCPty.id]);
     expect(ptyManager.spawnedOptions).toHaveLength(initialSpawnCount);
-    expect(layout.model()).toEqual({
-      id: "root",
-      direction: "horizontal",
-      children: [untouchedBranch],
-    });
-    expect(layout.model().children?.[0]).toBe(untouchedBranch);
+    expect(layout.model()).toBe(untouchedBranch);
   });
+
 
   test("terminates the original PTY when it resolves after its pane unmounts during a split", async () => {
     // Given
@@ -425,7 +417,7 @@ describe("LayoutManager", () => {
     const closing = layout.closePane("pane-a");
 
     // Then
-    expect(collectPaneIds(layout.model())).toEqual([layout.model().id, siblingModel.id]);
+    expect(collectPaneIds(layout.model())).toEqual([siblingModel.id]);
     expect(layout.focusedId()).toBe(siblingModel.id);
     replacementPaneCleanup();
     await closing;
@@ -519,8 +511,8 @@ describe("LayoutManager", () => {
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(ptyManager, model);
     const ptyIds = new Map<string, string>();
-    const onPtyReady = async (paneId: string, ptyId: string) => {
-      ptyIds.set(paneId, ptyId);
+    const onPtyReady = (paneId: string, ptyId: string) => {
+      if (!ptyIds.has(paneId)) ptyIds.set(paneId, ptyId);
     };
     const nodeProps = {
       model: layout.model,
@@ -541,12 +533,9 @@ describe("LayoutManager", () => {
       onFocus: () => {},
       onPtyReady,
       onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
-      cols: 80,
-      rows: 24,
     });
     await settlePromises();
     const originalPtyId = ptyIds.get(survivingPane.id);
-    if (!originalPtyId) throw new Error("Surviving pane PTY was not spawned");
 
     await layout.closePane(closingPane.id);
 
@@ -560,8 +549,6 @@ describe("LayoutManager", () => {
         onFocus: () => {},
         onPtyReady,
         onPtyCleanup: (_paneId, ptyId) => ptyManager.terminate(ptyId),
-        cols: 80,
-        rows: 24,
       });
       await settlePromises();
     }
@@ -591,8 +578,8 @@ describe("LayoutManager", () => {
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(ptyManager, model);
     const ptyIds = new Map<string, string>();
-    const onPtyReady = async (paneId: string, ptyId: string) => {
-      ptyIds.set(paneId, ptyId);
+    const onPtyReady = (paneId: string, ptyId: string) => {
+      if (!ptyIds.has(paneId)) ptyIds.set(paneId, ptyId);
     };
     const nodeProps = {
       model: layout.model,
@@ -615,38 +602,30 @@ describe("LayoutManager", () => {
       onFocus: () => {},
       onPtyReady,
       onPtyCleanup: () => {},
-      cols: 80,
-      rows: 24,
     });
     await settlePromises();
     const originalPtyId = ptyIds.get(innerLeft.id);
-    if (!originalPtyId) throw new Error("Inner-left PTY was not spawned");
 
     await layout.closePane(innerRight.id);
 
-    const updatedInnerSplit = layout.model().children?.[1];
-    if (!updatedInnerSplit?.children) throw new Error("Nested split was removed");
-    expect(updatedInnerSplit.children).toEqual([innerLeft]);
+    // After flattening, inner-split is replaced by innerLeft.
+    expect(layout.model().children?.[1]).toBe(innerLeft);
 
     renderedNodes.length = 0;
     renderedForItems.length = 0;
     LayoutNode(nodeProps);
     const updatedRootForItems = renderedForItems.at(-1);
-    if (!updatedRootForItems?.includes(innerSplitKey)) {
-      const updatedInnerLeft = updatedInnerSplit.children[0];
-      if (updatedInnerLeft === undefined) throw new Error("Inner-left pane was removed");
-      Pane({
-        model: updatedInnerLeft,
-        ptyManager,
-        focused: false,
-        onFocus: () => {},
-        onPtyReady,
-        onPtyCleanup: () => {},
-        cols: 80,
-        rows: 24,
-      });
-      await settlePromises();
-    }
+    expect(updatedRootForItems).toEqual([outerLeft.id, innerLeft.id]);
+
+    Pane({
+      model: innerLeft,
+      ptyManager,
+      focused: false,
+      onFocus: () => {},
+      onPtyReady,
+      onPtyCleanup: () => {},
+    });
+    await settlePromises();
 
     expect(ptyIds.get(innerLeft.id)).toBe(originalPtyId);
   });

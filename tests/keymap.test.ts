@@ -31,9 +31,8 @@ describe("keymap helpers", () => {
 
     expect(terminated).toEqual(["left"]);
     expect(result.root).toEqual({
-      id: "split-1",
-      direction: "horizontal",
-      children: [{ id: "right", ptyOptions: { command: "bash", args: [] } }],
+      id: "right",
+      ptyOptions: { command: "bash", args: [] },
     });
     expect(result.focusedId).toBe("right");
   });

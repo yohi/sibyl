@@ -12,13 +12,11 @@ export interface PaneProps {
   onFocus: () => void;
   onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>;
   onPtyCleanup?: (paneId: string, ptyId: PtyId) => void;
-  cols: number;
-  rows: number;
 }
 
 export function Pane(props: PaneProps) {
   const MAX_OUTPUT_LINES = 1000;
-  const [output, setOutput] = createSignal("");
+  const [outputLines, setOutputLines] = createSignal<string[]>([]);
   const terminalDimensions = useTerminalDimensions();
   const [ptyHandle, setPtyHandle] = createSignal<PtyHandle>();
   let disposed = false;
@@ -27,6 +25,9 @@ export function Pane(props: PaneProps) {
   let removeExitListener = () => {};
 
   createEffect(() => {
+    // OpenTUI does not currently expose per-pane dimensions, so we fall back
+    // to the full terminal size. When a pane-level size API becomes available,
+    // replace terminalDimensions() with that measurement.
     const { width, height } = terminalDimensions();
     const cols = Math.floor(width);
     const rows = Math.floor(height);
@@ -44,9 +45,10 @@ export function Pane(props: PaneProps) {
       lastOscStart !== -1 && !lastOsc.includes("\x07") && !lastOsc.includes("\x1b\\");
     const complete = isIncompleteOsc ? raw.slice(0, lastOscStart) : raw;
     pendingOsc = isIncompleteOsc ? lastOsc : "";
-    setOutput((previous) => {
-      const lines = `${previous}${stripAnsi(complete)}`.split(/\r?\n/);
-      return lines.slice(-MAX_OUTPUT_LINES).join("\n");
+    const newLines = stripAnsi(complete).split(/\r?\n/);
+    setOutputLines((previous) => {
+      const merged = [...previous, ...newLines];
+      return merged.slice(-MAX_OUTPUT_LINES);
     });
   };
 
@@ -57,12 +59,12 @@ export function Pane(props: PaneProps) {
       .then(async (handle) => {
         await props.onPtyReady(props.model.id, handle.id);
         if (disposed) {
-          props.onPtyCleanup?.(props.model.id, handle.id);
+          void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
           return;
         }
         const oldHandle = ptyHandle();
         if (oldHandle !== undefined) {
-          props.onPtyCleanup?.(props.model.id, oldHandle.id);
+          void Promise.resolve(props.onPtyCleanup?.(props.model.id, oldHandle.id)).catch(() => {});
         }
         setPtyHandle(handle);
         removeDataListener = handle.onData(appendOutput);
@@ -83,19 +85,23 @@ export function Pane(props: PaneProps) {
     removeDataListener();
     removeExitListener();
     const handle = ptyHandle();
-    if (handle !== undefined) props.onPtyCleanup?.(props.model.id, handle.id);
+    if (handle !== undefined) {
+      void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
+    }
   });
 
   useKeyboard((event) => {
     const handle = ptyHandle();
     if (!props.focused || !handle) return;
-    handle.write(event.sequence ?? event.raw ?? event.name);
+    const seq = event.sequence ?? event.raw ?? event.name;
+    if (seq === undefined) return;
+    handle.write(seq);
   });
 
   return (
     <box flexGrow={1} border={true} borderStyle="single" onMouseUp={props.onFocus} focusable={true}>
       <scrollbox flexGrow={1}>
-        <text content={output()} />
+        <text content={outputLines().join("\n")} />
       </scrollbox>
     </box>
   );
