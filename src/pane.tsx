@@ -57,6 +57,10 @@ export function Pane(props: PaneProps) {
     void props.ptyManager
       .spawn(props.model.ptyOptions)
       .then(async (handle) => {
+        if (disposed) {
+          void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
+          return;
+        }
         await props.onPtyReady(props.model.id, handle.id);
         if (disposed) {
           void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
