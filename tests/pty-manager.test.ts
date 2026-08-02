@@ -136,8 +136,12 @@ if (process.versions.bun === undefined) {
       const pty = await manager.spawn({ command: shell, args: [], cols: 80, rows: 24 });
 
       const dataPromise = new Promise<string>((resolve) => {
+        let accumulated = "";
         pty.onData((data) => {
-          if (data.length > 0) resolve(data);
+          accumulated += data;
+          if (accumulated.includes("hello")) {
+            resolve(accumulated);
+          }
         });
       });
 

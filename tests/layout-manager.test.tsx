@@ -4,14 +4,14 @@ import type { PaneModel } from "../src/types";
 import { FakePtyManager } from "./fake-pty-manager";
 
 // allow: SIZE_OK — Solid lifecycle mocks intentionally share one module-scoped LayoutManager suite.
-const lifecycle: { cleanup?: () => void } = {};
+const lifecycle: { cleanups: (() => void)[] } = { cleanups: [] };
 
 function isSignalUpdater<T>(next: T | ((previous: T) => T)): next is (previous: T) => T {
   return typeof next === "function";
 }
 
 function getCleanup(): (() => void) | undefined {
-  return lifecycle.cleanup;
+  return lifecycle.cleanups.at(-1);
 }
 
 function createSignal<T>(initial: T) {
@@ -28,7 +28,7 @@ mock.module("solid-js", () => ({
   createSignal,
   createEffect: () => {},
   onCleanup: (callback: () => void) => {
-    lifecycle.cleanup = callback;
+    lifecycle.cleanups.push(callback);
   },
   onMount: (callback: () => void) => callback(),
   For,
