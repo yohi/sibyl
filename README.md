@@ -19,8 +19,14 @@ bun test
 ## Installation
 
 ```json
+// opencode.json
 {
-  "plugin": ["@yohi/sibyl"]
+  "plugin": ["@yohi/sibyl/server"]
+}
+
+// tui.json
+{
+  "plugin": ["@yohi/sibyl/tui"]
 }
 ```
 

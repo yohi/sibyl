@@ -6,6 +6,7 @@ import { FakePtyManager } from "./fake-pty-manager";
 
 // allow: SIZE_OK — Solid lifecycle mocks intentionally share one module-scoped LayoutManager suite.
 const lifecycle: { cleanups: (() => void)[]; cleanup?: () => void } = { cleanups: [] };
+const keyboardCallbacks: Array<(event: { readonly name?: string }) => void> = [];
 
 function isSignalUpdater<T>(next: T | ((previous: T) => T)): next is (previous: T) => T {
   return typeof next === "function";
@@ -37,7 +38,9 @@ mock.module("solid-js", () => ({
 }));
 
 mock.module("@opentui/solid", () => ({
-  useKeyboard: () => {},
+  useKeyboard: (callback: (event: { readonly name?: string }) => void) => {
+    keyboardCallbacks.push(callback);
+  },
   useTerminalDimensions: () => () => ({ width: 80, height: 24 }),
 }));
 
@@ -311,6 +314,10 @@ describe("LayoutManager", () => {
         created.push(pane);
         return pane;
       },
+      spawn: (manager, options) => manager.spawn(options),
+      write: (session, data) => session.write(data),
+      resize: (session, columns, rows) => session.resize(columns, rows),
+      terminate: (manager, ptyId) => manager.terminate(ptyId),
     };
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(
@@ -346,6 +353,28 @@ describe("LayoutManager", () => {
       ],
     });
     expect(layout.focusedId()).toBe("pane-c");
+  });
+
+  test("keeps the pane-to-PTY mapping when cleanup termination fails so close can retry", async () => {
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    let terminationAttempts = 0;
+    const ptyManager = {
+      terminate: async () => {
+        terminationAttempts += 1;
+        if (terminationAttempts === 1) throw new Error("PTY did not exit");
+      },
+    };
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    });
+    await layout.onPtyReady("pane-a", "pty-a");
+
+    await expect(layout.onPtyCleanup("pane-a", "pty-a")).rejects.toThrow("PTY did not exit");
+    await layout.closePane("pane-a");
+
+    expect(terminationAttempts).toBe(2);
+    expect(layout.model().children).toEqual([]);
   });
 
   test("terminates a stale PTY when the pane was removed before spawn resolved", async () => {
@@ -742,5 +771,61 @@ describe("LayoutManager", () => {
     await settlePromises();
 
     expect(ptyIds.get(innerLeft.id)).toBe(originalPtyId);
+  });
+
+  test("routes focused pane input through the configured pane backend only", async () => {
+    const { Pane } = await import("../src/pane");
+    const ptyManager = new FakePtyManager();
+    const backendWrites: string[] = [];
+    const paneBackend: PaneBackend = {
+      create: (options) => ({ id: "backend-pane", ptyOptions: options }),
+      spawn: (manager, options) => manager.spawn(options),
+      write: (_session, data) => {
+        backendWrites.push(data);
+      },
+      resize: () => {},
+      terminate: (manager, ptyId) => manager.terminate(ptyId),
+    };
+
+    Pane({
+      model: { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+      ptyManager,
+      paneBackend,
+      focused: true,
+      onFocus: () => {},
+      onPtyReady: async () => {},
+    });
+    await settlePromises();
+    const onKeyPress = keyboardCallbacks.at(-1);
+    if (!onKeyPress) throw new Error("Pane keyboard handler was not registered");
+
+    onKeyPress({ name: "x" });
+
+    expect(backendWrites).toEqual(["x"]);
+    expect(ptyManager.writes.get("fake-pty-1")).toEqual([]);
+  });
+
+  test("clears a naturally exited PTY handle before routing another keypress", async () => {
+    const { Pane } = await import("../src/pane");
+    const ptyManager = new FakePtyManager();
+    const exited: Array<readonly [string, string]> = [];
+
+    Pane({
+      model: { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+      ptyManager,
+      focused: true,
+      onFocus: () => {},
+      onPtyReady: async () => {},
+      onPtyExit: (paneId, ptyId) => exited.push([paneId, ptyId]),
+    });
+    await settlePromises();
+    ptyManager.emitExit("fake-pty-1", { exitCode: 0 });
+    const onKeyPress = keyboardCallbacks.at(-1);
+    if (!onKeyPress) throw new Error("Pane keyboard handler was not registered");
+
+    onKeyPress({ name: "x" });
+
+    expect(exited).toEqual([["pane-a", "fake-pty-1"]]);
+    expect(ptyManager.writes.get("fake-pty-1")).toEqual([]);
   });
 });

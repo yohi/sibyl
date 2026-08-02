@@ -1,17 +1,20 @@
 /** @jsxImportSource @opentui/solid */
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import type { PtyHandle, PtyId, PtyManager } from "./pty-manager.js";
+import type { PaneBackend, PaneSpawner } from "./pane-backend.js";
+import type { PtyHandle, PtyId } from "./pty-manager.js";
 import { PtyOutputBuffer } from "./pty-output-buffer.js";
 import type { PaneModel } from "./types.js";
 
 export interface PaneProps {
   model: PaneModel;
-  ptyManager: Pick<PtyManager, "spawn">;
+  ptyManager: PaneSpawner;
+  paneBackend?: PaneBackend;
   focused: boolean;
   onFocus: () => void;
   onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>;
-  onPtyCleanup?: (paneId: string, ptyId: PtyId) => void;
+  onPtyExit?: (paneId: string, ptyId: PtyId) => void;
+  onPtyCleanup?: (paneId: string, ptyId: PtyId) => Promise<void> | void;
 }
 
 export function Pane(props: PaneProps) {
@@ -32,7 +35,11 @@ export function Pane(props: PaneProps) {
     const rows = Math.floor(height);
     const handle = ptyHandle();
     if (handle !== undefined && cols > 0 && rows > 0) {
-      handle.resize(cols, rows);
+      if (props.paneBackend) {
+        props.paneBackend.resize(handle, cols, rows);
+      } else {
+        handle.resize(cols, rows);
+      }
     }
   });
 
@@ -40,29 +47,42 @@ export function Pane(props: PaneProps) {
     setOutputText(outputBuffer.append(data));
   };
 
+  const cleanupPty = (ptyId: PtyId) => {
+    const cleanup = props.onPtyCleanup?.(props.model.id, ptyId);
+    if (cleanup === undefined) return;
+    void Promise.resolve(cleanup).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      appendOutput(`PTY cleanup failed: ${message}\n`);
+    });
+  };
+
   onMount(() => {
     if (!props.model.ptyOptions) return;
-    void props.ptyManager
-      .spawn(props.model.ptyOptions)
+    const spawn =
+      props.paneBackend?.spawn(props.ptyManager, props.model.ptyOptions) ??
+      props.ptyManager.spawn(props.model.ptyOptions);
+    void spawn
       .then(async (handle) => {
         if (disposed) {
-          void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
+          cleanupPty(handle.id);
           return;
         }
         await props.onPtyReady(props.model.id, handle.id);
         if (disposed) {
-          void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
+          cleanupPty(handle.id);
           return;
         }
         const oldHandle = ptyHandle();
         if (oldHandle !== undefined) {
-          void Promise.resolve(props.onPtyCleanup?.(props.model.id, oldHandle.id)).catch(() => {});
+          cleanupPty(oldHandle.id);
         }
         setPtyHandle(handle);
         removeDataListener = handle.onData(appendOutput);
         removeExitListener = handle.onExit(() => {
           removeDataListener();
           removeExitListener();
+          setPtyHandle();
+          props.onPtyExit?.(props.model.id, handle.id);
         });
       })
       .catch((error: unknown) => {
@@ -78,7 +98,7 @@ export function Pane(props: PaneProps) {
     removeExitListener();
     const handle = ptyHandle();
     if (handle !== undefined) {
-      void Promise.resolve(props.onPtyCleanup?.(props.model.id, handle.id)).catch(() => {});
+      cleanupPty(handle.id);
     }
   });
 
@@ -87,7 +107,11 @@ export function Pane(props: PaneProps) {
     if (!props.focused || !handle) return;
     const seq = event.sequence ?? event.raw ?? event.name;
     if (seq === undefined) return;
-    handle.write(seq);
+    if (props.paneBackend) {
+      props.paneBackend.write(handle, seq);
+    } else {
+      handle.write(seq);
+    }
   });
 
   return (

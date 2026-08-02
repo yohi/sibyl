@@ -1,6 +1,13 @@
 import type { IPty } from "node-pty";
 import type { PtyId } from "./pty-manager.js";
 
+export class PtyTerminationTimeoutError extends Error {
+  constructor(ptyId: PtyId) {
+    super(`PTY ${ptyId} did not exit after SIGKILL`);
+    this.name = "PtyTerminationTimeoutError";
+  }
+}
+
 export class PtyTerminator {
   private readonly terminating = new Map<PtyId, Promise<void>>();
   private exitFallbackRegistered = false;
@@ -52,12 +59,14 @@ export class PtyTerminator {
       return;
     }
 
+    let exited = false;
     let resolveExit = () => {};
     const exitPromise = new Promise<void>((resolve) => {
       resolveExit = resolve;
     });
     let exitListener: ReturnType<IPty["onExit"]> | undefined;
     exitListener = terminal.onExit(() => {
+      exited = true;
       exitListener?.dispose();
       resolveExit();
     });
@@ -87,16 +96,19 @@ export class PtyTerminator {
     try {
       if (process.platform === "win32") {
         this.killTerminal(terminal);
-        await waitForExit();
+        if (!(await waitForExit())) throw new PtyTerminationTimeoutError(id);
       } else {
         this.killTerminal(terminal, "SIGTERM");
-        if (!(await waitForExit())) this.killTerminal(terminal, "SIGKILL");
+        if (!(await waitForExit())) {
+          this.killTerminal(terminal, "SIGKILL");
+          if (!(await waitForExit())) throw new PtyTerminationTimeoutError(id);
+        }
       }
     } catch (error) {
       if (!this.exited.has(id)) throw error;
     } finally {
       exitListener?.dispose();
-      this.dispose(id);
+      if (exited || this.exited.has(id)) this.dispose(id);
     }
   }
 

@@ -56,7 +56,7 @@ class FakePty implements IPty {
 
   kill(signal?: string): void {
     this.killSignals.push(signal);
-    if (!this.emitsExitOnKill) return;
+    if (!this.emitsExitOnKill && signal !== "SIGKILL") return;
     for (const listener of [...this.exitListeners]) {
       listener({ exitCode: 0 });
     }
@@ -164,17 +164,39 @@ describe("PtyManager", () => {
   });
 
   if (process.versions.bun !== undefined) {
+    test("uses the external PTY loader on Bun for Windows", async () => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+      if (platformDescriptor === undefined) {
+        throw new Error("Process platform descriptor is unavailable");
+      }
+      Object.defineProperty(process, "platform", { value: "win32" });
+      try {
+        const fakePty = new FakePty();
+        let loaderCalls = 0;
+        const externalPty = { spawn: (): IPty => fakePty };
+        const manager = new PtyManager(undefined, async () => {
+          loaderCalls += 1;
+          return externalPty;
+        });
+
+        const pty = await manager.spawn({ command: "fake-shell", args: [] });
+
+        expect(loaderCalls).toBe(1);
+        await manager.terminate(pty.id);
+      } finally {
+        Object.defineProperty(process, "platform", platformDescriptor);
+      }
+    });
+
     test("uses the built-in Bun PTY adapter when no adapter is injected", async () => {
+      if (process.platform === "win32") return;
+
       const manager = new PtyManager(undefined, async () => {
         throw new Error("node-pty loader invoked");
       });
-      const expectedError =
-        process.platform === "win32"
-          ? "Bun on Windows does not yet support PTY. Please provide a Bun PTY adapter."
-          : 'Executable not found in $PATH: "fake-shell"';
 
       await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
-        expectedError,
+        'Executable not found in $PATH: "fake-shell"',
       );
     });
   }

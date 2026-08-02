@@ -28,7 +28,9 @@ export function createTuiPlugin(
     api.route.register([
       {
         name: "sibyl",
-        render: () => <LayoutManager ptyManager={ptyManager} controller={layout} />,
+        render: () => (
+          <LayoutManager ptyManager={ptyManager} paneBackend={paneBackend} controller={layout} />
+        ),
       },
     ]);
     api.keymap.registerLayer({

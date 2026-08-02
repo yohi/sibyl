@@ -9,15 +9,16 @@ import {
   removeLeaf,
   splitPane as splitPaneInTree,
 } from "./keymap.js";
-import type { PaneBackend } from "./pane-backend.js";
+import type { PaneBackend, PanePtyManager } from "./pane-backend.js";
 import { Pane } from "./pane.js";
 import type { PtyId, PtyManager } from "./pty-manager.js";
 import type { PaneId, PaneModel, PtyOptions, SplitDirection } from "./types.js";
 
-type LayoutPtyManager = Pick<PtyManager, "spawn" | "terminate">;
+type LayoutPtyManager = PanePtyManager;
 
 export interface LayoutManagerProps {
   readonly ptyManager: LayoutPtyManager;
+  readonly paneBackend?: PaneBackend;
   readonly controller: LayoutManagerController;
 }
 
@@ -29,6 +30,7 @@ export interface LayoutManagerController {
   readonly focusNext: () => void;
   readonly focusPrev: () => void;
   readonly onPtyReady: (paneId: PaneId, ptyId: PtyId) => Promise<void>;
+  readonly onPtyExit: (paneId: PaneId, ptyId: PtyId) => void;
   readonly onPtyCleanup: (paneId: PaneId, ptyId: PtyId) => Promise<void>;
   readonly focusPane: (paneId: PaneId) => void;
 }
@@ -69,7 +71,7 @@ export function createLayoutManagerController(
       if (!terminatedPtyIds.has(ptyId)) {
         terminatedPtyIds.add(ptyId);
         try {
-          await ptyManager.terminate(ptyId);
+          await (paneBackend?.terminate(ptyManager, ptyId) ?? ptyManager.terminate(ptyId));
         } catch (error) {
           terminatedPtyIds.delete(ptyId);
           throw error;
@@ -96,17 +98,26 @@ export function createLayoutManagerController(
   const onPtyReady = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
     // ペインがモデルから既に削除されている場合、受信した PTY は直ちに終了する。
     if (!findPane(model(), paneId)) {
-      await ptyManager.terminate(ptyId);
+      await (paneBackend?.terminate(ptyManager, ptyId) ?? ptyManager.terminate(ptyId));
       return;
     }
     ptyIdByPane.set(paneId, ptyId);
   };
 
-  const onPtyCleanup = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
+  const onPtyExit = (paneId: PaneId, ptyId: PtyId): void => {
     if (ptyIdByPane.get(paneId) === ptyId) ptyIdByPane.delete(paneId);
+  };
+
+  const onPtyCleanup = async (paneId: PaneId, ptyId: PtyId): Promise<void> => {
     if (terminatedPtyIds.has(ptyId)) return;
     terminatedPtyIds.add(ptyId);
-    await ptyManager.terminate(ptyId);
+    try {
+      await (paneBackend?.terminate(ptyManager, ptyId) ?? ptyManager.terminate(ptyId));
+      onPtyExit(paneId, ptyId);
+    } catch (error) {
+      terminatedPtyIds.delete(ptyId);
+      throw error;
+    }
   };
 
   return {
@@ -117,21 +128,24 @@ export function createLayoutManagerController(
     focusNext,
     focusPrev,
     onPtyReady,
+    onPtyExit,
     onPtyCleanup,
     focusPane: setFocusedId,
   };
 }
 
 export function LayoutManager(props: LayoutManagerProps) {
-  const { model, focusedId, onPtyReady, onPtyCleanup, focusPane } = props.controller;
+  const { model, focusedId, onPtyReady, onPtyExit, onPtyCleanup, focusPane } = props.controller;
 
   return (
     <LayoutNode
       model={model}
       ptyManager={props.ptyManager}
+      paneBackend={props.paneBackend}
       focusedId={focusedId}
       onFocus={focusPane}
       onPtyReady={onPtyReady}
+      onPtyExit={onPtyExit}
       onPtyCleanup={onPtyCleanup}
       isRoot={true}
     />
@@ -141,9 +155,11 @@ export function LayoutManager(props: LayoutManagerProps) {
 export interface LayoutNodeProps {
   readonly model: Accessor<PaneModel>;
   readonly ptyManager: LayoutPtyManager;
+  readonly paneBackend?: PaneBackend;
   readonly focusedId: () => string | undefined;
   readonly onFocus: (paneId: string) => void;
   readonly onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>;
+  readonly onPtyExit?: (paneId: PaneId, ptyId: PtyId) => void;
   readonly onPtyCleanup: (paneId: PaneId, ptyId: PtyId) => Promise<void> | void;
   readonly isRoot?: boolean;
 }
@@ -156,9 +172,11 @@ export function LayoutNode(props: LayoutNodeProps) {
         <Pane
           model={props.model()}
           ptyManager={props.ptyManager}
+          paneBackend={props.paneBackend}
           focused={props.focusedId() === props.model().id}
           onFocus={() => props.onFocus(props.model().id)}
           onPtyReady={props.onPtyReady}
+          onPtyExit={props.onPtyExit}
           onPtyCleanup={(_paneId, ptyId) => props.onPtyCleanup(props.model().id, ptyId)}
         />
       }
@@ -178,9 +196,11 @@ export function LayoutNode(props: LayoutNodeProps) {
                 <LayoutNode
                   model={() => findPane(props.model(), childId) ?? childModel}
                   ptyManager={props.ptyManager}
+                  paneBackend={props.paneBackend}
                   focusedId={props.focusedId}
                   onFocus={props.onFocus}
                   onPtyReady={props.onPtyReady}
+                  onPtyExit={props.onPtyExit}
                   onPtyCleanup={props.onPtyCleanup}
                 />
               );

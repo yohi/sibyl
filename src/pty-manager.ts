@@ -216,13 +216,15 @@ export class PtyManager {
         return this.loadBunPtyAdapter();
       }
       if (process.platform === "win32") {
-        throw new Error(
-          "Bun on Windows does not yet support PTY. Please provide a Bun PTY adapter.",
-        );
+        return this.loadExternalPtyModule();
       }
       const { createBunPtyAdapter } = await import("./bun-pty-adapter.js");
       return createBunPtyAdapter();
     }
+    return this.loadExternalPtyModule();
+  }
+
+  private loadExternalPtyModule(): Promise<PtyModule> {
     this.nodePtyModule ??= this.loadNodePty().catch((error: unknown) => {
       this.nodePtyModule = undefined;
       throw new Error("No compatible PTY adapter is available", { cause: error });
