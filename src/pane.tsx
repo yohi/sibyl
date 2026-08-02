@@ -1,8 +1,8 @@
 /** @jsxImportSource @opentui/solid */
 import { useKeyboard, useTerminalDimensions } from "@opentui/solid";
 import { createEffect, createSignal, onCleanup, onMount } from "solid-js";
-import { stripAnsi } from "./ansi-strip.js";
 import type { PtyHandle, PtyId, PtyManager } from "./pty-manager.js";
+import { PtyOutputBuffer } from "./pty-output-buffer.js";
 import type { PaneModel } from "./types.js";
 
 export interface PaneProps {
@@ -15,12 +15,11 @@ export interface PaneProps {
 }
 
 export function Pane(props: PaneProps) {
-  const MAX_OUTPUT_LINES = 1000;
-  const [outputLines, setOutputLines] = createSignal<string[]>([]);
+  const outputBuffer = new PtyOutputBuffer(1000);
+  const [outputText, setOutputText] = createSignal("");
   const terminalDimensions = useTerminalDimensions();
   const [ptyHandle, setPtyHandle] = createSignal<PtyHandle>();
   let disposed = false;
-  let pendingOsc = "";
   let removeDataListener = () => {};
   let removeExitListener = () => {};
 
@@ -38,18 +37,7 @@ export function Pane(props: PaneProps) {
   });
 
   const appendOutput = (data: string) => {
-    const raw = pendingOsc + data;
-    const lastOscStart = raw.lastIndexOf("\x1b]");
-    const lastOsc = lastOscStart === -1 ? "" : raw.slice(lastOscStart);
-    const isIncompleteOsc =
-      lastOscStart !== -1 && !lastOsc.includes("\x07") && !lastOsc.includes("\x1b\\");
-    const complete = isIncompleteOsc ? raw.slice(0, lastOscStart) : raw;
-    pendingOsc = isIncompleteOsc ? lastOsc : "";
-    const newLines = stripAnsi(complete).split(/\r?\n/);
-    setOutputLines((previous) => {
-      const merged = [...previous, ...newLines];
-      return merged.slice(-MAX_OUTPUT_LINES);
-    });
+    setOutputText(outputBuffer.append(data));
   };
 
   onMount(() => {
@@ -105,7 +93,7 @@ export function Pane(props: PaneProps) {
   return (
     <box flexGrow={1} border={true} borderStyle="single" onMouseUp={props.onFocus} focusable={true}>
       <scrollbox flexGrow={1}>
-        <text content={outputLines().join("\n")} />
+        <text content={outputText()} />
       </scrollbox>
     </box>
   );

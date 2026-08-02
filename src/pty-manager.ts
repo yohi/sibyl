@@ -1,4 +1,5 @@
 import type { IPty } from "node-pty";
+import { PtyTerminator } from "./pty-terminator.js";
 import type { PtyOptions } from "./types.js";
 
 export type PtyId = string;
@@ -26,6 +27,9 @@ export class PtyManager {
   private exited = new Set<PtyId>();
   private idCounter = 0;
   private nodePtyModule?: Promise<PtyModule>;
+  private readonly terminator = new PtyTerminator(this.terminals, this.exited, (id) =>
+    this.dispose(id),
+  );
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
@@ -49,6 +53,7 @@ export class PtyManager {
     });
 
     this.terminals.set(id, terminal);
+    this.terminator.registerExitFallback();
 
     // 新しい購読者が登録される前に発生したデータ/終了イベントを
     // 保持するため、コールバック集合に加えてバッファで蓄積する。
@@ -80,7 +85,9 @@ export class PtyManager {
     const exitSub = terminal.onExit((event) => {
       this.exited.add(id);
       this.pendingExit.set(id, event);
+      const hadExitSubscribers = (this.exitCallbacks.get(id)?.size ?? 0) > 0;
       this.emitExit(id, event);
+      if (hadExitSubscribers) this.dispose(id);
     });
     this.exitSubscriptions.set(id, exitSub);
 
@@ -89,70 +96,12 @@ export class PtyManager {
     return this.withReplay(id, handle);
   }
 
-  async terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
-    const terminal = this.terminals.get(id);
-    if (!terminal) {
-      this.dispose(id);
-      return;
-    }
-
-    let resolveExit = () => {};
-    const exitPromise = new Promise<void>((resolve) => {
-      resolveExit = resolve;
-    });
-    let exitListener: ReturnType<IPty["onExit"]> | undefined;
-    exitListener = terminal.onExit(() => {
-      exitListener?.dispose();
-      resolveExit();
-    });
-
-    // onExit を先に登録する。すでに終了済みなら待機せずに解決する。
-    if (this.exited.has(id)) {
-      exitListener?.dispose();
-      resolveExit();
-      await exitPromise;
-      this.dispose(id);
-      return;
-    }
-
-    const waitForExit = async (): Promise<boolean> => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([
-          exitPromise.then(() => true),
-          new Promise<false>((resolve) => {
-            timer = setTimeout(() => resolve(false), gracefulTimeoutMs);
-          }),
-        ]);
-      } finally {
-        if (timer !== undefined) clearTimeout(timer);
-      }
-    };
-
-    try {
-      if (process.platform === "win32") {
-        terminal.kill();
-
-        // node-pty の kill() 後に onExit が来ない場合でもタイマーで解決する。
-        await waitForExit();
-      } else {
-        terminal.kill("SIGTERM");
-
-        if (!(await waitForExit())) {
-          terminal.kill("SIGKILL");
-        }
-      }
-    } catch {
-      // terminal.kill may throw for already-exited processes
-    } finally {
-      exitListener?.dispose();
-      this.dispose(id);
-    }
+  terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
+    return this.terminator.terminate(id, gracefulTimeoutMs);
   }
 
   terminateAll(): Promise<void> {
-    const promises = Array.from(this.terminals.keys()).map((id) => this.terminate(id));
-    return Promise.all(promises).then(() => undefined);
+    return this.terminator.terminateAll();
   }
 
   private emitData(_id: PtyId, _data: string): void {
@@ -236,7 +185,11 @@ export class PtyManager {
         if (!exitReplayedCallbacks.has(callback)) {
           exitReplayedCallbacks.add(callback);
           const event = this.pendingExit.get(id);
-          if (event !== undefined) callback(event);
+          if (event !== undefined) {
+            callback(event);
+            this.dispose(id);
+            return () => {};
+          }
         }
         return originalOnExit(callback);
       },
@@ -254,6 +207,7 @@ export class PtyManager {
     this.pendingData.delete(id);
     this.pendingExit.delete(id);
     this.exited.delete(id);
+    this.terminator.unregisterExitFallbackWhenIdle();
   }
 
   private async loadPtyModule(): Promise<PtyModule> {

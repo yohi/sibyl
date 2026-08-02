@@ -96,12 +96,11 @@ class BunPty implements IPty {
   }
 
   kill(signal?: string): void {
-    if (signal !== undefined) {
-      this.subprocess.kill(signal as Parameters<BunSubprocess["kill"]>[0]);
+    if (signal === "SIGTERM" || signal === "SIGKILL") {
+      this.subprocess.kill(signal);
     } else {
       this.subprocess.kill();
     }
-    this.subprocess.terminal?.close();
   }
 
   // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.

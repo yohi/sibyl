@@ -3,7 +3,7 @@ import type { IEvent, IPty } from "node-pty";
 import { PtyManager } from "../src/pty-manager";
 
 class FakePty implements IPty {
-  readonly pid = 1;
+  readonly pid = 0;
   readonly cols = 80;
   readonly rows = 24;
   readonly process = "fake-shell";
@@ -131,6 +131,32 @@ describe("PtyManager", () => {
       jest.advanceTimersByTime(10);
       await termination;
 
+      expect(fakePty.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  test("shares an in-flight termination for the same PTY", async () => {
+    // Given
+    if (process.platform === "win32") return;
+    jest.useFakeTimers();
+    try {
+      const fakePty = new FakePty(false);
+      const fakeNodePty = { spawn: (): IPty => fakePty };
+      const manager = new PtyManager(
+        async () => fakeNodePty,
+        async () => fakeNodePty,
+      );
+      const pty = await manager.spawn({ command: "fake-shell", args: [] });
+
+      // When
+      const first = manager.terminate(pty.id, 10);
+      const second = manager.terminate(pty.id, 10);
+      jest.advanceTimersByTime(10);
+      await Promise.all([first, second]);
+
+      // Then
       expect(fakePty.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
     } finally {
       jest.useRealTimers();

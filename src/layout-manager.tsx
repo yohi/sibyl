@@ -2,12 +2,14 @@
 import { For, Show, createSignal } from "solid-js";
 import type { Accessor } from "solid-js";
 import {
+  closePane as closePaneInTree,
   findPane,
   nextLeaf,
   prevLeaf,
   removeLeaf,
   splitPane as splitPaneInTree,
 } from "./keymap.js";
+import type { PaneBackend } from "./pane-backend.js";
 import { Pane } from "./pane.js";
 import type { PtyId, PtyManager } from "./pty-manager.js";
 import type { PaneId, PaneModel, PtyOptions, SplitDirection } from "./types.js";
@@ -33,6 +35,7 @@ export interface LayoutManagerController {
 export function createLayoutManagerController(
   ptyManager: Pick<PtyManager, "terminate">,
   initialModel: PaneModel,
+  paneBackend?: PaneBackend,
 ): LayoutManagerController {
   const [model, setModel] = createSignal(initialModel);
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel));
@@ -44,7 +47,15 @@ export function createLayoutManagerController(
     const target = findPane(model(), focused);
     if (target === undefined || target.children !== undefined) return;
 
-    setModel((current) => splitPaneInTree(current, focused, direction, newPtyOptions));
+    setModel((current) =>
+      splitPaneInTree(
+        current,
+        focused,
+        direction,
+        newPtyOptions,
+        paneBackend ? (options) => paneBackend.create(options) : undefined,
+      ),
+    );
   };
 
   const closePane = async (id = focusedId()) => {
@@ -52,25 +63,24 @@ export function createLayoutManagerController(
     const target = findPane(model(), id);
     if (target === undefined || target.children !== undefined) return;
 
-    const ptyId = ptyIdByPane.get(id);
-    let focusCandidate: PaneId | undefined;
-    setModel((current) => {
-      focusCandidate = nextLeaf(current, id);
-      return removeLeaf(current, id) ?? { id: current.id, children: [] };
+    const closeResult = await closePaneInTree(model(), id, async () => {
+      const ptyId = ptyIdByPane.get(id);
+      if (ptyId === undefined) return;
+      if (!terminatedPtyIds.has(ptyId)) {
+        terminatedPtyIds.add(ptyId);
+        try {
+          await ptyManager.terminate(ptyId);
+        } catch (error) {
+          terminatedPtyIds.delete(ptyId);
+          throw error;
+        }
+      }
+      ptyIdByPane.delete(id);
     });
 
-    const current = model();
-    setFocusedId(
-      focusCandidate !== undefined && findPane(current, focusCandidate) !== undefined
-        ? focusCandidate
-        : firstLeafId(current),
-    );
-
-    if (ptyId !== undefined) {
-      ptyIdByPane.delete(id);
-      terminatedPtyIds.add(ptyId);
-      await ptyManager.terminate(ptyId);
-    }
+    const nextModel = closeResult.root ?? { id: model().id, children: [] };
+    setModel(nextModel);
+    setFocusedId(closeResult.focusedId ?? firstLeafId(nextModel));
   };
 
   const focusNext = () => {
@@ -166,7 +176,7 @@ export function LayoutNode(props: LayoutNodeProps) {
               if (childModel === undefined) return null;
               return (
                 <LayoutNode
-                  model={() => childModel}
+                  model={() => findPane(props.model(), childId) ?? childModel}
                   ptyManager={props.ptyManager}
                   focusedId={props.focusedId}
                   onFocus={props.onFocus}
