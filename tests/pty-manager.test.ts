@@ -116,9 +116,13 @@ describe("PtyManager", () => {
       const manager = new PtyManager(undefined, async () => {
         throw new Error("node-pty loader invoked");
       });
+      const expectedError =
+        process.platform === "win32"
+          ? "Bun on Windows does not yet support PTY. Please provide a Bun PTY adapter."
+          : 'Executable not found in $PATH: "fake-shell"';
 
       await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
-        'Executable not found in $PATH: "fake-shell"',
+        expectedError,
       );
     });
   }
