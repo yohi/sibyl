@@ -172,7 +172,7 @@ describe("LayoutManager", () => {
       focusedId: () => "pane-a",
       onFocus: () => {},
       onPtyReady: async () => {},
-      onPtyCleanup: (ptyId: string) => ptyManager.terminate(ptyId),
+      onPtyCleanup: (_paneId: string, ptyId: string) => ptyManager.terminate(ptyId),
     };
 
     renderedNodes.length = 0;
@@ -238,6 +238,25 @@ describe("LayoutManager", () => {
     expect(layout.focusedId()).toBe("pane-c");
   });
 
+  test("terminates a stale PTY when the pane was removed before spawn resolved", async () => {
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const ptyManager = new FakePtyManager();
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "root",
+      direction: "horizontal",
+      children: [
+        { id: "pane-a", ptyOptions: { command: "fake-shell", args: [] } },
+      ],
+    });
+
+    // Simulate a late onPtyReady call after the pane was closed (stale PTY)
+    const stalePty = await ptyManager.spawn({ command: "fake-shell", args: [] });
+    await layout.closePane("pane-a");
+    await layout.onPtyReady("pane-a", stalePty.id);
+
+    // onPtyReady should detect pane absence and terminate the stale PTY immediately
+    expect(ptyManager.terminatedIds).toContain(stalePty.id);
+  });
   test("terminates the closed pane PTY while preserving untouched branches", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager");
     const model = {
