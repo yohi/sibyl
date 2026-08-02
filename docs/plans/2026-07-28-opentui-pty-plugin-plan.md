@@ -13,12 +13,14 @@
 - `package.json` は `"type": "module"` とし、ルート import 用の `exports["."]` と `exports["./server"]` / `exports["./tui"]` を提供する。
 - OpenCode engine: `^1.18.8` 以上。
 - OpenTUI peer dependencies: `@opentui/core`, `@opentui/solid`, `@opentui/keymap` はすべて `>=0.4.5 <1` とする。
-- `@types/bun` と CI の Bun はともに `1.1.17` に固定し、lockfile と合わせて再現可能なビルドにする。
+- CI の Bun ランタイムは `1.3.14` に固定する（Bun.Terminal PTY 対応のため）。`@types/bun` も `1.3.14` に固定し、lockfile と合わせて再現可能なビルドにする。
 - 絶対パスは使用しない。環境変数または相対パスで解決する。
 - 型安全: `as any`, `@ts-ignore`, `@ts-expect-error` は禁止。
 - エラーハンドリング: 空の catch ブロックは禁止。
 - クリーンアップ: POSIX では SIGTERM → 1.5秒 timeout → SIGKILL。Windows では `terminal.kill()`。
 - PTY 出力の表示は初期実装で ANSI strip / 簡易表示とし、将来の ANSI 解釈方式・セルマトリクス方式への進化を明示する。
+- Bun/POSIX では内蔵の `Bun.Terminal` ベース PTY アダプターを使用する。Bun/Windows では `node-pty` 互換の外部 PTY アダプターが必要。
+- ペイン分割時は、Solid の reconciliation により元のペインコンポーネントが再マウントされ、新しい PTY が生成される。元の PTY セッションを維持しながら分割する機能は将来の拡張とする。
 
 ---
 
@@ -1698,7 +1700,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: "1.1.17"
+          bun-version: "1.3.14"
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run build
@@ -1801,3 +1803,4 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
 
 - `PtyManager` の `emitData` / `emitExit` は Task 3 で `Map<PtyId, Set<callback>>` による複数 handle・複数購読者対応を実装する。
 - `node-pty` の Bun 互換性は CI（Task 11）で検証する。
+- `LayoutManager` の `ptyIdByPane`（`paneId -> ptyId` の追跡マップ）のレース条件について、`Pane.onMount` で `disposed` ガードを追加し（`5880255`）、さらに `createLayoutManagerController.onPtyReady` でペインのモデル存在確認を追加、`onPtyCleanup` で `terminatedPtyIds` セットによる重複防止と孤児 PTY のクリーンアップを実施済み（回帰テスト追加）。
