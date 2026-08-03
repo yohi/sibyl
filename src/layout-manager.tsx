@@ -128,13 +128,8 @@ export function createLayoutManagerController(
       if (handle === undefined) return;
       cancelCleanup(id);
       pendingSpawns.delete(id);
-      try {
-        await doTerminate(handle.id);
-        ptyHandleByPane.delete(id);
-      } catch (error) {
-        // 終了に失敗した場合はマッピングを保持し、closePane による再試行を可能にする。
-        throw error;
-      }
+      await doTerminate(handle.id);
+      ptyHandleByPane.delete(id);
     });
 
     const nextModel = closeResult.root ?? { id: model().id, children: [] };

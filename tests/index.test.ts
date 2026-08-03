@@ -82,7 +82,7 @@ const frame = setup.captureCharFrame();
 setup.renderer.destroy();
 await Promise.resolve();
 if (!frame.includes("sibyl-output")) throw new Error("Missing expected PTY output in frame");
-if (terminated.join(",") !== "pty-1") throw new Error("Unexpected terminated PTYs: " + (terminated.join(",") || "(none)"));`
+if (terminated.join(",") !== "pty-1") throw new Error("Unexpected terminated PTYs: " + (terminated.join(",") || "(none)"));`,
       ],
       {
         cwd: process.cwd(),

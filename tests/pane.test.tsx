@@ -124,6 +124,9 @@ describe("Pane", () => {
 
     // Then
     expect(ptyManager.spawnedOptions).toHaveLength(1);
-    expect(onPtyReady).toHaveBeenCalledWith("pane-1", expect.objectContaining({ id: "fake-pty-1" }));
+    expect(onPtyReady).toHaveBeenCalledWith(
+      "pane-1",
+      expect.objectContaining({ id: "fake-pty-1" }),
+    );
   });
 });
