@@ -28,20 +28,24 @@ export class PtyManager {
   private exited = new Set<PtyId>();
   private idCounter = 0;
   private nodePtyModule?: Promise<PtyModule>;
-  private readonly processTracker = new PtyProcessTracker(() => this.getPlatform());
-  private readonly terminator = new PtyTerminator(
-    this.terminals,
-    this.exited,
-    (id) => this.dispose(id),
-    this.processTracker,
-    () => this.getPlatform(),
-  );
+  private readonly processTracker;
+  private readonly terminator;
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
     private readonly loadNodePty: () => Promise<PtyModule> = () => import("node-pty"),
     private readonly getPlatform: () => NodeJS.Platform = () => process.platform,
-  ) {}
+    processTracker?: PtyProcessTracker,
+  ) {
+    this.processTracker = processTracker ?? new PtyProcessTracker(() => this.getPlatform());
+    this.terminator = new PtyTerminator(
+      this.terminals,
+      this.exited,
+      (id) => this.dispose(id),
+      this.processTracker,
+      () => this.getPlatform(),
+    );
+  }
 
   async spawn(options: PtyOptions): Promise<PtyHandle> {
     const id = `pty-${++this.idCounter}`;
@@ -95,8 +99,7 @@ export class PtyManager {
     const exitSub = terminal.onExit((event) => {
       this.exited.add(id);
       this.pendingExit.set(id, event);
-      const hadExitSubscribers = (this.exitCallbacks.get(id)?.size ?? 0) > 0;
-      if (hadExitSubscribers) void this.disposeExitedPtyIfNoDescendants(id);
+      void this.disposeExitedPtyIfNoDescendants(id);
     });
     this.exitSubscriptions.set(id, exitSub);
 

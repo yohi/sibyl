@@ -1,9 +1,10 @@
 import { describe, expect, jest, test } from "bun:test";
 import type { IEvent, IPty } from "node-pty";
 import { PtyManager } from "../src/pty-manager";
+import { PtyProcessTracker } from "../src/pty-process-tracker";
 
 class FakePty implements IPty {
-  readonly pid = 0;
+  pid: number;
   readonly cols = 80;
   readonly rows = 24;
   readonly process = "fake-shell";
@@ -17,7 +18,12 @@ class FakePty implements IPty {
     (event: { exitCode: number; signal?: number }) => void
   >();
 
-  constructor(private readonly emitsExitOnKill = true) {}
+  constructor(
+    private readonly emitsExitOnKill = true,
+    { pid = 0 }: { pid?: number } = {},
+  ) {
+    this.pid = pid;
+  }
 
   readonly onData: IEvent<string> = (listener) => {
     const isFirstListener = this.dataListeners.size === 0;
@@ -202,6 +208,28 @@ describe("PtyManager", () => {
       },
     );
   }
+  test("stops process tracking when a PTY exits without exit subscribers", async () => {
+    const fakePty = new FakePty(true, { pid: 12345 });
+    const fakeNodePty = { spawn: (): IPty => fakePty };
+    const processTracker = new PtyProcessTracker(() => process.platform);
+    const stopSpy = jest.spyOn(processTracker, "stop");
+
+    const manager = new PtyManager(
+      async () => fakeNodePty,
+      async () => fakeNodePty,
+      () => process.platform,
+      processTracker,
+    );
+
+    const pty = await manager.spawn({ command: "fake-shell", args: [] });
+    fakePty.kill();
+
+    // activePids が解決するのを待つ。
+    await new Promise((resolve) => setTimeout(resolve, 50));
+
+    expect(stopSpy).toHaveBeenCalledWith(pty.id);
+    expect(processTracker.isTracking(pty.id)).toBe(false);
+  });
 });
 
 if (process.versions.bun === undefined) {
