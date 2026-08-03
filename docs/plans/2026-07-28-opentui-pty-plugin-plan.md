@@ -1810,7 +1810,7 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
 - Task 9のすべてのSibyl key bindingは`preventDefault: true`を指定する。これにより、
   keymapがペイン操作キーを消費し、フォーカス中の`Pane.useKeyboard`が同じキーをPTYへ
   書き込まないことを保証する。
-- Task 2の最小表示方式は、CSI/OSCだけでなく、C0制御文字（LF/TAB以外）および
+- Task 2の最小表示方式は、CSI/OSCだけでなく、C0制御文字（LF、CR、TABを除く）および
   DCS/SOS/PM/APCをペイロードごと除去する。`PtyOutputBuffer`は未完了の文字列制御を
   次チャンクまで保持する。
 - Task 9の`removeLeaf()`は単一子となったsplitノードをその唯一の子へ縮約する。これにより
