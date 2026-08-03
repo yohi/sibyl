@@ -35,9 +35,12 @@ describe("server-safe package entrypoint", () => {
 
   test("uses the shared Solid runtime in the published TUI bundle", async () => {
     const bundle = await Bun.file(new URL("../dist/tui.js", import.meta.url)).text();
+    const rollupConfig = await Bun.file(new URL("../rollup.config.js", import.meta.url)).text();
 
-    expect(bundle).toContain("from 'solid-js';");
-    expect(bundle).not.toContain("function createSignal(");
+    expect(bundle).toMatch(/from\s*["']solid-js["']/);
+    expect(bundle).not.toMatch(/\bcreateSignal\s*[=(]\s*(function|\()/);
+    expect(bundle.length).toBeLessThan(50_000);
+    expect(rollupConfig).toMatch(/external:\s*\[[^\]]*solid-js/);
   });
 
   test("renders PTY output and cleans up through the OpenCode Solid runtime", async () => {
