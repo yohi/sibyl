@@ -83,7 +83,11 @@ export function createTuiPlugin(
         { key: "ctrl+a x", cmd: "sibyl.close", preventDefault: true },
       ],
     });
-    api.lifecycle.onDispose(() => ptyManager.terminateAll());
+    api.lifecycle.onDispose(() => {
+      ptyManager.terminateAll().catch((error: unknown) => {
+        console.error("Failed to terminate all PTYs during dispose:", error);
+      });
+    });
   };
 }
 

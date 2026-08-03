@@ -35,59 +35,61 @@ class ExitControlledPty implements IPty {
 }
 
 describe("PtyTerminator", () => {
-  test("waits for a SIGKILL exit before disposing a POSIX PTY", async () => {
-    if (process.platform === "win32") return;
+  test.skipIf(process.platform === "win32")(
+    "waits for a SIGKILL exit before disposing a POSIX PTY",
+    async () => {
+      jest.useFakeTimers();
+      try {
+        const terminal = new ExitControlledPty();
+        const terminals = new Map([["pty-1", terminal]]);
+        let disposed = false;
+        const terminator = new PtyTerminator(terminals, new Set(), () => {
+          disposed = true;
+        });
 
-    jest.useFakeTimers();
-    try {
-      const terminal = new ExitControlledPty();
-      const terminals = new Map([["pty-1", terminal]]);
-      let disposed = false;
-      const terminator = new PtyTerminator(terminals, new Set(), () => {
-        disposed = true;
-      });
+        const termination = terminator.terminate("pty-1", 10);
+        jest.advanceTimersByTime(10);
+        await Promise.resolve();
 
-      const termination = terminator.terminate("pty-1", 10);
-      jest.advanceTimersByTime(10);
-      await Promise.resolve();
+        expect(terminal.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+        expect(disposed).toBe(false);
 
-      expect(terminal.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
-      expect(disposed).toBe(false);
+        terminal.emitExit();
+        await termination;
 
-      terminal.emitExit();
-      await termination;
+        expect(disposed).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
 
-      expect(disposed).toBe(true);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
+  test.skipIf(process.platform === "win32")(
+    "keeps a PTY available for retry when SIGKILL does not emit an exit",
+    async () => {
+      jest.useFakeTimers();
+      try {
+        const terminal = new ExitControlledPty();
+        const terminals = new Map([["pty-1", terminal]]);
+        let disposed = false;
+        const terminator = new PtyTerminator(terminals, new Set(), () => {
+          disposed = true;
+        });
 
-  test("keeps a PTY available for retry when SIGKILL does not emit an exit", async () => {
-    if (process.platform === "win32") return;
+        const firstTermination = terminator.terminate("pty-1", 10);
+        jest.advanceTimersByTime(20);
 
-    jest.useFakeTimers();
-    try {
-      const terminal = new ExitControlledPty();
-      const terminals = new Map([["pty-1", terminal]]);
-      let disposed = false;
-      const terminator = new PtyTerminator(terminals, new Set(), () => {
-        disposed = true;
-      });
+        await expect(firstTermination).rejects.toThrow("did not exit after SIGKILL");
+        expect(disposed).toBe(false);
 
-      const firstTermination = terminator.terminate("pty-1", 10);
-      jest.advanceTimersByTime(20);
+        const retry = terminator.terminate("pty-1", 10);
+        terminal.emitExit();
+        await retry;
 
-      await expect(firstTermination).rejects.toThrow("did not exit after SIGKILL");
-      expect(disposed).toBe(false);
-
-      const retry = terminator.terminate("pty-1", 10);
-      terminal.emitExit();
-      await retry;
-
-      expect(disposed).toBe(true);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
+        expect(disposed).toBe(true);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
 });

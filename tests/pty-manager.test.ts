@@ -137,31 +137,34 @@ describe("PtyManager", () => {
     }
   });
 
-  test("shares an in-flight termination for the same PTY", async () => {
-    // Given
-    if (process.platform === "win32") return;
-    jest.useFakeTimers();
-    try {
-      const fakePty = new FakePty(false);
-      const fakeNodePty = { spawn: (): IPty => fakePty };
-      const manager = new PtyManager(
-        async () => fakeNodePty,
-        async () => fakeNodePty,
-      );
-      const pty = await manager.spawn({ command: "fake-shell", args: [] });
+  test.skipIf(process.platform === "win32")(
+    "shares an in-flight termination for the same PTY",
+    async () => {
+      // Given
 
-      // When
-      const first = manager.terminate(pty.id, 10);
-      const second = manager.terminate(pty.id, 10);
-      jest.advanceTimersByTime(10);
-      await Promise.all([first, second]);
+      jest.useFakeTimers();
+      try {
+        const fakePty = new FakePty(false);
+        const fakeNodePty = { spawn: (): IPty => fakePty };
+        const manager = new PtyManager(
+          async () => fakeNodePty,
+          async () => fakeNodePty,
+        );
+        const pty = await manager.spawn({ command: "fake-shell", args: [] });
 
-      // Then
-      expect(fakePty.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
-    } finally {
-      jest.useRealTimers();
-    }
-  });
+        // When
+        const first = manager.terminate(pty.id, 10);
+        const second = manager.terminate(pty.id, 10);
+        jest.advanceTimersByTime(10);
+        await Promise.all([first, second]);
+
+        // Then
+        expect(fakePty.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
 
   if (process.versions.bun !== undefined) {
     test("uses the external PTY loader on Bun for Windows", async () => {
@@ -186,17 +189,18 @@ describe("PtyManager", () => {
       await manager.terminate(pty.id);
     });
 
-    test("uses the built-in Bun PTY adapter when no adapter is injected", async () => {
-      if (process.platform === "win32") return;
+    test.skipIf(process.platform === "win32")(
+      "uses the built-in Bun PTY adapter when no adapter is injected",
+      async () => {
+        const manager = new PtyManager(undefined, async () => {
+          throw new Error("node-pty loader invoked");
+        });
 
-      const manager = new PtyManager(undefined, async () => {
-        throw new Error("node-pty loader invoked");
-      });
-
-      await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
-        'Executable not found in $PATH: "fake-shell"',
-      );
-    });
+        await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
+          'Executable not found in $PATH: "fake-shell"',
+        );
+      },
+    );
   }
 });
 

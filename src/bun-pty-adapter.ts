@@ -23,6 +23,7 @@ class BunPty implements IPty {
     (event: { exitCode: number; signal?: number }) => void
   >();
   private readonly subprocess: BunSubprocess;
+  private exitEmitted = false;
 
   constructor(command: string, args: string[], options: BunPtyOptions) {
     this.process = command;
@@ -53,10 +54,7 @@ class BunPty implements IPty {
           }
         },
         exit: async (_terminal, _exitCode, _signal) => {
-          const exitCode = await this.subprocess.exited;
-          for (const listener of this.exitListeners) {
-            listener({ exitCode, signal: undefined });
-          }
+          await this.emitExit(undefined);
           this.subprocess.terminal?.close();
         },
       },
@@ -96,17 +94,29 @@ class BunPty implements IPty {
   }
 
   kill(signal?: string): void {
-    if (signal === "SIGTERM" || signal === "SIGKILL") {
-      this.subprocess.kill(signal);
+    const normalizedSignal = signal === "SIGTERM" || signal === "SIGKILL" ? signal : undefined;
+    if (normalizedSignal !== undefined) {
+      this.subprocess.kill(normalizedSignal);
     } else {
       this.subprocess.kill();
     }
+    void this.subprocess.exited.then(() => this.emitExit(normalizedSignal));
   }
 
   // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   pause(): void {}
   // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   resume(): void {}
+
+  private async emitExit(signal?: string): Promise<void> {
+    if (this.exitEmitted) return;
+    this.exitEmitted = true;
+    const exitCode = await this.subprocess.exited;
+    const signalNumber = signal === "SIGKILL" ? 9 : signal === "SIGTERM" ? 15 : undefined;
+    for (const listener of this.exitListeners) {
+      listener({ exitCode, signal: signalNumber });
+    }
+  }
 }
 
 export function createBunPtyAdapter(): PtyModule {

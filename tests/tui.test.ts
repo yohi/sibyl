@@ -1,20 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import plugin from "../src/tui";
 
-function createDeferred<T>() {
-  let resolvePromise: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-
-  return {
-    promise,
-    resolve(value: T): void {
-      if (!resolvePromise) throw new Error("Deferred promise is not initialized");
-      resolvePromise(value);
-    },
-  };
-}
+import { createDeferred } from "./helpers/deferred";
 
 describe("TUI plugin", () => {
   test("exports default plugin object", () => {
@@ -104,6 +91,8 @@ describe("TUI plugin", () => {
     const operationBindings = layers[0]?.bindings?.filter((binding) =>
       operationCommands.has(binding.cmd ?? ""),
     );
+    expect(operationBindings).toBeArray();
+    expect(operationBindings?.length).toBeGreaterThan(0);
     expect(operationBindings?.every((binding) => binding.preventDefault === true)).toBe(true);
   });
 
@@ -142,15 +131,16 @@ describe("TUI plugin", () => {
     const result = dispose();
 
     // Then
-    expect(result).toBeInstanceOf(Promise);
+    // The handler now catches termination failures fire-and-forget.
+    expect(result).toBeUndefined();
     let settled = false;
-    void Promise.resolve(result).then(() => {
+    termination.promise.then(() => {
       settled = true;
     });
     await Promise.resolve();
     expect(settled).toBe(false);
     termination.resolve();
-    await result;
+    await termination.promise;
     expect(settled).toBe(true);
   });
 });

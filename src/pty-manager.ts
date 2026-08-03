@@ -28,12 +28,13 @@ export class PtyManager {
   private exited = new Set<PtyId>();
   private idCounter = 0;
   private nodePtyModule?: Promise<PtyModule>;
-  private readonly processTracker = new PtyProcessTracker();
+  private readonly processTracker = new PtyProcessTracker(() => this.getPlatform());
   private readonly terminator = new PtyTerminator(
     this.terminals,
     this.exited,
     (id) => this.dispose(id),
     this.processTracker,
+    () => this.getPlatform(),
   );
 
   constructor(
@@ -83,6 +84,8 @@ export class PtyManager {
               buffer.shift();
             }
           }
+        } else {
+          // 購読者がいる場合は emitData に任せる。
         }
         this.emitData(id, data);
       }
@@ -93,7 +96,6 @@ export class PtyManager {
       this.exited.add(id);
       this.pendingExit.set(id, event);
       const hadExitSubscribers = (this.exitCallbacks.get(id)?.size ?? 0) > 0;
-      this.emitExit(id, event);
       if (hadExitSubscribers) void this.disposeExitedPtyIfNoDescendants(id);
     });
     this.exitSubscriptions.set(id, exitSub);
