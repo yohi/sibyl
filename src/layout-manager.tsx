@@ -6,7 +6,6 @@ import {
   findPane,
   nextLeaf,
   prevLeaf,
-  removeLeaf,
   splitPane as splitPaneInTree,
 } from "./keymap.js";
 import type { PaneBackend, PanePtyManager } from "./pane-backend.js";
