@@ -10,6 +10,7 @@ export interface PaneProps {
   model: PaneModel;
   ptyManager: PaneSpawner;
   paneBackend?: PaneBackend;
+  initialPtyHandle?: PtyHandle;
   focused: boolean;
   onFocus: () => void;
   onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>;
@@ -56,8 +57,39 @@ export function Pane(props: PaneProps) {
     });
   };
 
+  const attachPtyHandle = (handle: PtyHandle) => {
+    setPtyHandle(handle);
+    removeDataListener = handle.onData(appendOutput);
+    removeExitListener = handle.onExit(() => {
+      removeDataListener();
+      removeExitListener();
+      setPtyHandle();
+      props.onPtyExit?.(props.model.id, handle.id);
+    });
+  };
+
   onMount(() => {
     if (!props.model.ptyOptions) return;
+
+    const initialHandle = props.initialPtyHandle;
+    if (initialHandle !== undefined) {
+      void props
+        .onPtyReady(props.model.id, initialHandle.id)
+        .then(() => {
+          if (disposed) {
+            cleanupPty(initialHandle.id);
+            return;
+          }
+          attachPtyHandle(initialHandle);
+        })
+        .catch((error: unknown) => {
+          if (disposed) return;
+          const message = error instanceof Error ? error.message : String(error);
+          appendOutput(`PTY start failed: ${message}\n`);
+        });
+      return;
+    }
+
     const spawn =
       props.paneBackend?.spawn(props.ptyManager, props.model.ptyOptions) ??
       props.ptyManager.spawn(props.model.ptyOptions);
@@ -76,14 +108,7 @@ export function Pane(props: PaneProps) {
         if (oldHandle !== undefined) {
           cleanupPty(oldHandle.id);
         }
-        setPtyHandle(handle);
-        removeDataListener = handle.onData(appendOutput);
-        removeExitListener = handle.onExit(() => {
-          removeDataListener();
-          removeExitListener();
-          setPtyHandle();
-          props.onPtyExit?.(props.model.id, handle.id);
-        });
+        attachPtyHandle(handle);
       })
       .catch((error: unknown) => {
         if (disposed) return;
