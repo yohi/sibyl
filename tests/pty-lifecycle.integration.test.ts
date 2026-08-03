@@ -50,7 +50,7 @@ test.skipIf(process.platform === "win32")(
       expect(childAlive).toBe(false);
     } finally {
       // Ensure descendant tracking stops even if the child ignored SIGTERM.
-      manager.terminate(pty.id).catch(() => {});
+      await manager.terminate(pty.id).catch(() => {});
       unsubscribe?.();
     }
   },

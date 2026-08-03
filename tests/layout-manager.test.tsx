@@ -194,7 +194,7 @@ describe("LayoutManager", () => {
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(ptyManager, nestedModel);
     const pty = await ptyManager.spawn({ command: "fake-shell", args: [] });
-    await layout.onPtyReady("pane-b", pty.id);
+    await layout.onPtyReady("pane-b", pty);
 
     LayoutNode({
       model: layout.model,
@@ -281,7 +281,7 @@ describe("LayoutManager", () => {
         { id: "right", ptyOptions: { command: "fake-shell", args: [] } },
       ],
     });
-    await layout.onPtyReady("left", "pty-left");
+    await layout.onPtyReady("left", createPtyHandle("pty-left"));
 
     // When
     const closing = layout.closePane("left");
@@ -651,8 +651,8 @@ describe("LayoutManager", () => {
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(ptyManager, model);
     const ptyIds = new Map<string, string>();
-    const onPtyReady = async (paneId: string, ptyId: string) => {
-      if (!ptyIds.has(paneId)) ptyIds.set(paneId, ptyId);
+    const onPtyReady = async (paneId: string, handle: PtyHandle) => {
+      if (!ptyIds.has(paneId)) ptyIds.set(paneId, handle.id);
     };
     const nodeProps = {
       model: layout.model,
@@ -718,8 +718,8 @@ describe("LayoutManager", () => {
     const ptyManager = new FakePtyManager();
     const layout = createLayoutManagerController(ptyManager, model);
     const ptyIds = new Map<string, string>();
-    const onPtyReady = async (paneId: string, ptyId: string) => {
-      if (!ptyIds.has(paneId)) ptyIds.set(paneId, ptyId);
+    const onPtyReady = async (paneId: string, handle: PtyHandle) => {
+      if (!ptyIds.has(paneId)) ptyIds.set(paneId, handle.id);
     };
     const nodeProps = {
       model: layout.model,

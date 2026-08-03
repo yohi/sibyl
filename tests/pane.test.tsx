@@ -86,7 +86,7 @@ describe("Pane", () => {
     const { Pane } = await import("../src/pane");
     const ptyManager = new FakePtyManager();
     const paneBackend = createMockPaneBackend();
-    const onPtyReady = mock(async (_paneId: string, _ptyId: PtyId) => {});
+    const onPtyReady = mock(async (_paneId: string, _handle: PtyHandle) => {});
     const initialHandle = createPtyHandle("pty-1");
 
     // When
@@ -110,7 +110,7 @@ describe("Pane", () => {
     // Given
     const { Pane } = await import("../src/pane");
     const ptyManager = new FakePtyManager();
-    const onPtyReady = mock(async (_paneId: string, _ptyId: PtyId) => {});
+    const onPtyReady = mock(async (_paneId: string, _handle: PtyHandle) => {});
 
     // When
     Pane({

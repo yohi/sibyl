@@ -224,8 +224,11 @@ describe("PtyManager", () => {
     const pty = await manager.spawn({ command: "fake-shell", args: [] });
     fakePty.kill();
 
-    // activePids が解決するのを待つ。
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    // activePids または終了処理の解決を待つ。
+    const deadline = Date.now() + 1000;
+    while ((stopSpy.mock.calls.length === 0 || processTracker.isTracking(pty.id)) && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
 
     expect(stopSpy).toHaveBeenCalledWith(pty.id);
     expect(processTracker.isTracking(pty.id)).toBe(false);

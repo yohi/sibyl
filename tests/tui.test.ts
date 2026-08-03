@@ -92,7 +92,7 @@ describe("TUI plugin", () => {
       operationCommands.has(binding.cmd ?? ""),
     );
     expect(operationBindings).toBeArray();
-    expect(operationBindings?.length).toBeGreaterThan(0);
+    expect(operationBindings?.length).toBe(operationCommands.size);
     expect(operationBindings?.every((binding) => binding.preventDefault === true)).toBe(true);
   });
 
