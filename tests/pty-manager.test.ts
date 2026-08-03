@@ -226,7 +226,10 @@ describe("PtyManager", () => {
 
     // activePids または終了処理の解決を待つ。
     const deadline = Date.now() + 1000;
-    while ((stopSpy.mock.calls.length === 0 || processTracker.isTracking(pty.id)) && Date.now() < deadline) {
+    while (
+      (stopSpy.mock.calls.length === 0 || processTracker.isTracking(pty.id)) &&
+      Date.now() < deadline
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 

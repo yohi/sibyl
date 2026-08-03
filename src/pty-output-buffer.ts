@@ -1,4 +1,4 @@
-import { findStringControlStart, STRING_CONTROL_ESC_STARTS, stripAnsi } from "./ansi-strip.js";
+import { STRING_CONTROL_ESC_STARTS, findStringControlStart, stripAnsi } from "./ansi-strip.js";
 
 const MAX_PENDING_CONTROL_SEQUENCE_LENGTH = 1024;
 
@@ -46,7 +46,10 @@ function advancePastCsi(text: string, start: number): number {
   return start;
 }
 
-function dispatchEscSequence(text: string, start: number): { nextCursor?: number; incompleteStart?: number } {
+function dispatchEscSequence(
+  text: string,
+  start: number,
+): { nextCursor?: number; incompleteStart?: number } {
   const kind = text[start + 1];
   if (kind === undefined) return { incompleteStart: start };
 

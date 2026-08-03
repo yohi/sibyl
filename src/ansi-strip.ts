@@ -12,7 +12,7 @@ const STRING_CONTROL_START_PATTERN = /\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f]/g;
 export function findStringControlStart(text: string, cursor: number): number {
   STRING_CONTROL_START_PATTERN.lastIndex = cursor;
   const match = STRING_CONTROL_START_PATTERN.exec(text);
-  return match !== null ? match.index : Infinity;
+  return match !== null ? match.index : Number.POSITIVE_INFINITY;
 }
 
 function advancePastStringControlTerminator(
