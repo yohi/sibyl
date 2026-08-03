@@ -7,7 +7,12 @@ test("terminates a detached descendant when terminating its PTY", async () => {
   const manager = new PtyManager();
   const pty = await manager.spawn({
     command: "sh",
-    args: ["-c", "setsid sh -c 'trap \"\" HUP TERM; echo CHILD:$$; sleep 30' & sleep 0.2"],
+    // macOS には setsid(util-linux)が存在しないため、perl の POSIX::setsid で
+    // 新セッションへ脱離させる(macOS / Linux 両方に perl は標準搭載)。
+    args: [
+      "-c",
+      "perl -e 'use POSIX qw(setsid); setsid(); exec @ARGV' sh -c 'trap \"\" HUP TERM; echo CHILD:$$; sleep 30' & sleep 0.2",
+    ],
   });
   const childPid = await new Promise<number>((resolve, reject) => {
     let output = "";
