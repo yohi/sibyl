@@ -13,7 +13,9 @@ interface BunPtyOptions {
 type BunSubprocess = ReturnType<typeof Bun.spawn>;
 
 function toSignalNumber(signal?: string): number | undefined {
-  return signal === "SIGKILL" ? 9 : signal === "SIGTERM" ? 15 : undefined;
+  if (signal === "SIGKILL") return 9;
+  if (signal === "SIGTERM") return 15;
+  return undefined;
 }
 
 class BunPty implements IPty {
@@ -59,7 +61,7 @@ class BunPty implements IPty {
           }
         },
         exit: async (_terminal, _exitCode, _signal) => {
-          await this.emitExit(undefined);
+          await this.emitExit();
           this.subprocess.terminal?.close();
         },
       },

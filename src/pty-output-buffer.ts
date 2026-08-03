@@ -40,7 +40,7 @@ function advancePastEscStringControl(text: string, start: number): number | unde
 
 function advancePastCsi(text: string, start: number): number {
   for (let index = start + 2; index < text.length; index += 1) {
-    const code = text.charCodeAt(index);
+    const code = text.codePointAt(index) ?? 0;
     if (code >= 0x40 && code <= 0x7e) return index + 1;
   }
   return start;
@@ -53,7 +53,7 @@ function dispatchEscSequence(
   const kind = text[start + 1];
   if (kind === undefined) return { incompleteStart: start };
 
-  if (STRING_CONTROL_ESC_STARTS.some((candidate) => candidate === `\x1b${kind}`)) {
+  if (STRING_CONTROL_ESC_STARTS.includes(`\x1b${kind}`)) {
     const nextCursor = advancePastEscStringControl(text, start);
     if (nextCursor === undefined) return { incompleteStart: start };
     return { nextCursor };

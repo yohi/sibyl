@@ -7,7 +7,7 @@ export const STRING_CONTROL_ESC_STARTS = ["\x1b]", "\x1bP", "\x1bX", "\x1b^", "\
 export const STRING_CONTROL_C1_STARTS = ["\x9d", "\x90", "\x98", "\x9e", "\x9f"];
 export const STRING_CONTROL_STARTS = [...STRING_CONTROL_ESC_STARTS, ...STRING_CONTROL_C1_STARTS];
 
-const STRING_CONTROL_START_PATTERN = /\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f]/g;
+const STRING_CONTROL_START_PATTERN = /\u001b[\]PX^_]|[\u0090\u0098\u009d\u009e\u009f]/g; // NOSONAR - Control characters needed for ANSI sequence stripping.
 
 export function findStringControlStart(text: string, cursor: number): number {
   STRING_CONTROL_START_PATTERN.lastIndex = cursor;
@@ -19,7 +19,7 @@ function advancePastStringControlTerminator(
   text: string,
   controlStart: number,
 ): number | undefined {
-  const isC1 = text.charCodeAt(controlStart) >= 0x80;
+  const isC1 = (text.codePointAt(controlStart) ?? 0) >= 0x80;
   const isOsc = isC1 ? text[controlStart] === "\x9d" : text[controlStart + 1] === "]";
   const searchStart = controlStart + (isC1 ? 1 : 2);
 

@@ -85,7 +85,7 @@ export function createLayoutManagerController(
       }
       await doTerminate(ptyId).catch(() => {});
       const postAwaitHandle = ptyHandleByPane.get(paneId);
-      if (postAwaitHandle !== undefined && postAwaitHandle.id === ptyId) {
+      if (postAwaitHandle?.id === ptyId) {
         ptyHandleByPane.delete(paneId);
       }
     });
@@ -161,7 +161,7 @@ export function createLayoutManagerController(
 
   const onPtyExit = (paneId: PaneId, ptyId: string): void => {
     const handle = ptyHandleByPane.get(paneId);
-    if (handle !== undefined && handle.id === ptyId) ptyHandleByPane.delete(paneId);
+    if (handle?.id === ptyId) ptyHandleByPane.delete(paneId);
   };
 
   const onPtyCleanup = async (paneId: PaneId, ptyId: string): Promise<void> => {
