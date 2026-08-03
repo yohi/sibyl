@@ -63,6 +63,29 @@ describe("PtyOutputBuffer", () => {
     expect(output.text()).toBe("beforeafter\n");
   });
 
+  test("removes a C1 string control terminated by ESC-backslash", () => {
+    // Given
+    const output = new PtyOutputBuffer(1_000);
+
+    // When
+    output.append("before\u0090private");
+    output.append(" payload\x1b\\after\n");
+
+    // Then
+    expect(output.text()).toBe("beforeafter\n");
+  });
+
+  test("removes an ESC string control terminated by a C1 ST", () => {
+    // Given
+    const output = new PtyOutputBuffer(1_000);
+
+    // When
+    output.append("before\x1bPprivate");
+    output.append(" payload\u009cafter\n");
+
+    // Then
+    expect(output.text()).toBe("beforeafter\n");
+  });
   test("processes 1,000 PTY chunks within a performance smoke budget", () => {
     const output = new PtyOutputBuffer(1_000);
     const startedAt = performance.now();

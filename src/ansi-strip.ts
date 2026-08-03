@@ -2,51 +2,47 @@ const ANSI_PATTERN =
   /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\]|\^[\\@A-Z[\]^_`a-z{|}~]|_[\\\]^_`a-z{|}~]|\*|[\x80-\x9f])/g; // NOSONAR - ESC is required to remove ANSI sequences.
 const NON_RENDERING_C0_PATTERN = /[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]/g;
 const NON_RENDERING_C1_PATTERN = /[\x80-\x9f]/g;
-const STRING_CONTROL_STARTS = [
-  "\x1b]",
-  "\x1bP",
-  "\x1bX",
-  "\x1b^",
-  "\x1b_",
-  "\x9d",
-  "\x90",
-  "\x98",
-  "\x9e",
-  "\x9f",
-];
+
+export const STRING_CONTROL_ESC_STARTS = ["\x1b]", "\x1bP", "\x1bX", "\x1b^", "\x1b_"];
+export const STRING_CONTROL_C1_STARTS = ["\x9d", "\x90", "\x98", "\x9e", "\x9f"];
+export const STRING_CONTROL_STARTS = [...STRING_CONTROL_ESC_STARTS, ...STRING_CONTROL_C1_STARTS];
+
+function findStringControlStart(text: string, cursor: number): number {
+  const starts = STRING_CONTROL_STARTS.map((start) => text.indexOf(start, cursor)).filter(
+    (index) => index !== -1,
+  );
+  return Math.min(...starts);
+}
+
+function advancePastStringControlTerminator(
+  text: string,
+  controlStart: number,
+): number | undefined {
+  const isC1 = text.charCodeAt(controlStart) >= 0x80;
+  const isOsc = isC1 ? text[controlStart] === "\x9d" : text[controlStart + 1] === "]";
+  const searchStart = controlStart + (isC1 ? 1 : 2);
+
+  for (let index = searchStart; index < text.length; index += 1) {
+    if (isOsc && text[index] === "\x07") return index + 1;
+    if (text[index] === "\x9c") return index + 1;
+    if (text[index] === "\x1b" && text[index + 1] === "\\") return index + 2;
+  }
+
+  return undefined;
+}
 
 function stripStringControls(text: string): string {
   let result = "";
   let cursor = 0;
 
   while (cursor < text.length) {
-    const starts = STRING_CONTROL_STARTS.map((start) => text.indexOf(start, cursor)).filter(
-      (index) => index !== -1,
-    );
-    const controlStart = Math.min(...starts);
+    const controlStart = findStringControlStart(text, cursor);
     if (!Number.isFinite(controlStart)) return result + text.slice(cursor);
 
     result += text.slice(cursor, controlStart);
-    const isC1 = text.charCodeAt(controlStart) >= 0x80;
-    const isOsc = isC1 ? text[controlStart] === "\x9d" : text[controlStart + 1] === "]";
-    let terminator = controlStart + (isC1 ? 1 : 2);
-    while (terminator < text.length) {
-      if (isOsc && text[terminator] === "\x07") {
-        cursor = terminator + 1;
-        break;
-      }
-      if (text[terminator] === "\x9c") {
-        cursor = terminator + 1;
-        break;
-      }
-      if (text[terminator] === "\x1b" && text[terminator + 1] === "\\") {
-        cursor = terminator + 2;
-        break;
-      }
-      terminator += 1;
-    }
-
-    if (terminator === text.length) return result + text.slice(controlStart);
+    const nextCursor = advancePastStringControlTerminator(text, controlStart);
+    if (nextCursor === undefined) return result + text.slice(controlStart);
+    cursor = nextCursor;
   }
 
   return result;
