@@ -83,7 +83,7 @@ export function createTuiPlugin(
       ],
     });
     api.lifecycle.onDispose(() => {
-      ptyManager.terminateAll().catch((error: unknown) => {
+      void ptyManager.terminateAll().catch((error: unknown) => {
         console.error("Failed to terminate all PTYs during dispose:", error);
       });
     });
