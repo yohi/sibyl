@@ -254,7 +254,7 @@ running
 - ペイン操作キーは `api.keymap.registerLayer()` の各 binding で
   `preventDefault: true` を明示する。Keymap が操作キーを消費してから
   `useKeyboard` のPTY入力ハンドラへ到達するため、操作とシェル入力は混線しない。
-- 最小限表示方式は、CSI/OSCに加えてC0制御文字（改行・タブを除く）と
+- 最小限表示方式は、CSI/OSCに加えてC0制御文字（LF・CR・TABを除く）と
   DCS/SOS/PM/APC文字列制御を、チャンク境界をまたいでも表示バッファへ残さず除去する。
 - close後の再帰レイアウト木は、子が1つだけになったsplitノードを残存leafへ縮約する。
   これは計画時点のtree shapeに合わせた仕様であり、縮約に伴う再マウントで新しいPTYが

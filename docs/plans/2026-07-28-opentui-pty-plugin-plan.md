@@ -1818,4 +1818,4 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
   テスト期待値は廃止する。
 - Task 11のテストは通常スイートに加え、`bun test --conditions=browser --preload
   @opentui/solid/preload ./tests/pane-render.integration.tsx`を実行する。後者はPTY出力から
-  `Pane`の実描画フレームまでを計測し、1フレーム以内（16ms未満）で反映されることを確認する。
+  `Pane`の実描画フレームまでを計測し、コンテンツがフレーム内に適切に反映されることを確認する。

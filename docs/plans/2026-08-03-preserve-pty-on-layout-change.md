@@ -72,7 +72,7 @@ Expected: FAIL because `Pane` always spawns and ignores `initialPtyHandle`.
 In `src/pane.tsx`:
 1. Add `initialPtyHandle?: PtyHandle` to `PaneProps`.
 2. In `onMount`, if `initialPtyHandle` is provided:
-   - call `props.onPtyReady(props.model.id, initialPtyHandle.id)`
+   - call `props.onPtyReady(props.model.id, initialPtyHandle)`
    - `setPtyHandle(initialPtyHandle)`
    - attach `onData` / `onExit` listeners
    - skip `spawn`.
