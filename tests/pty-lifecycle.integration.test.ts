@@ -15,40 +15,44 @@ test.skipIf(process.platform === "win32")(
       ],
     });
 
-    const childPid = await new Promise<number>((resolve, reject) => {
-      let output = "";
-      const timeout = setTimeout(
-        () => reject(new Error("PTY did not report the child PID")),
-        3_000,
-      );
-      const unsubscribe = pty.onData((data) => {
-        output += data;
-        const match = output.match(/CHILD:(\d+)/);
-        if (match) {
-          clearTimeout(timeout);
-          unsubscribe();
-          resolve(Number(match[1]));
-        }
-      });
-    });
+    let unsubscribe: (() => void) | undefined;
 
     try {
+      const childPid = await new Promise<number>((resolve, reject) => {
+        let output = "";
+        const timeout = setTimeout(() => {
+          unsubscribe?.();
+          reject(new Error("PTY did not report the child PID"));
+        }, 3_000);
+        unsubscribe = pty.onData((data) => {
+          output += data;
+          const match = output.match(/CHILD:(\d+)/);
+          if (match) {
+            clearTimeout(timeout);
+            unsubscribe?.();
+            resolve(Number(match[1]));
+          }
+        });
+      });
+
       await manager.terminate(pty.id);
+
+      let childAlive = false;
+      try {
+        process.kill(childPid, 0);
+        childAlive = true;
+      } catch (error) {
+        if (!(error instanceof Error)) throw error;
+      } finally {
+        if (childAlive) process.kill(childPid, "SIGKILL");
+      }
+
+      expect(childAlive).toBe(false);
     } finally {
       // Ensure descendant tracking stops even if the child ignored SIGTERM.
       manager.terminate(pty.id).catch(() => {});
+      unsubscribe?.();
     }
-
-    let childAlive = false;
-    try {
-      process.kill(childPid, 0);
-      childAlive = true;
-    } catch (error) {
-      if (!(error instanceof Error)) throw error;
-    } finally {
-      if (childAlive) process.kill(childPid, "SIGKILL");
-    }
-
-    expect(childAlive).toBe(false);
   },
+  15_000,
 );
