@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { PaneBackend } from "../src/pane-backend";
 import type { PtyHandle, PtyManager } from "../src/pty-manager";
 import type { PaneModel } from "../src/types";
@@ -7,6 +7,10 @@ import { FakePtyManager } from "./fake-pty-manager";
 // allow: SIZE_OK — Solid lifecycle mocks intentionally share one module-scoped LayoutManager suite.
 const lifecycle: { cleanups: (() => void)[]; cleanup?: () => void } = { cleanups: [] };
 const keyboardCallbacks: Array<(event: { readonly name?: string }) => void> = [];
+
+beforeEach(() => {
+  keyboardCallbacks.length = 0;
+});
 
 function isSignalUpdater<T>(next: T | ((previous: T) => T)): next is (previous: T) => T {
   return typeof next === "function";
@@ -124,20 +128,7 @@ function collectPaneIds(model: PaneModel): string[] {
   return [model.id, ...(model.children?.flatMap(collectPaneIds) ?? [])];
 }
 
-function createDeferred<T>() {
-  let resolvePromise: ((value: T) => void) | undefined;
-  const promise = new Promise<T>((resolve) => {
-    resolvePromise = resolve;
-  });
-
-  return {
-    promise,
-    resolve(value: T): void {
-      if (!resolvePromise) throw new Error("Deferred promise is not initialized");
-      resolvePromise(value);
-    },
-  };
-}
+import { createDeferred } from "./helpers/deferred";
 
 function createPtyHandle(id: string): PtyHandle {
   return {

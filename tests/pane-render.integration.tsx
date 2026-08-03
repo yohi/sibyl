@@ -40,6 +40,9 @@ test("renders PTY output within one frame", async () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     if (emitData === undefined) throw new Error("Pane did not subscribe to PTY output");
 
+    // Warm-up render before measurement to avoid flaky first-frame costs in CI.
+    await view.renderOnce();
+
     // When
     const startedAt = performance.now();
     emitData("frame-visible\n");
