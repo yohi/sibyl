@@ -28,6 +28,7 @@ function splitPaneAt(
       id: nextUniqueId(usedIds, "pane"),
       ptyOptions: newPtyOptions,
     };
+    usedIds.add(newPane.id);
     return {
       id: nextUniqueId(usedIds, "split"),
       direction,

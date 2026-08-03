@@ -7,11 +7,12 @@ export const STRING_CONTROL_ESC_STARTS = ["\x1b]", "\x1bP", "\x1bX", "\x1b^", "\
 export const STRING_CONTROL_C1_STARTS = ["\x9d", "\x90", "\x98", "\x9e", "\x9f"];
 export const STRING_CONTROL_STARTS = [...STRING_CONTROL_ESC_STARTS, ...STRING_CONTROL_C1_STARTS];
 
-function findStringControlStart(text: string, cursor: number): number {
-  const starts = STRING_CONTROL_STARTS.map((start) => text.indexOf(start, cursor)).filter(
-    (index) => index !== -1,
-  );
-  return Math.min(...starts);
+const STRING_CONTROL_START_PATTERN = /\x1b[\]PX^_]|[\x90\x98\x9d\x9e\x9f]/g;
+
+export function findStringControlStart(text: string, cursor: number): number {
+  STRING_CONTROL_START_PATTERN.lastIndex = cursor;
+  const match = STRING_CONTROL_START_PATTERN.exec(text);
+  return match !== null ? match.index : Infinity;
 }
 
 function advancePastStringControlTerminator(

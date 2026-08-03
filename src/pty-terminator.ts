@@ -73,14 +73,12 @@ export class PtyTerminator {
       return;
     }
 
-    let exited = false;
     let resolveExit = () => {};
     const exitPromise = new Promise<void>((resolve) => {
       resolveExit = resolve;
     });
     let exitListener: ReturnType<IPty["onExit"]> | undefined;
     exitListener = terminal.onExit(() => {
-      exited = true;
       exitListener?.dispose();
       resolveExit();
     });
@@ -131,6 +129,10 @@ export class PtyTerminator {
     gracefulTimeoutMs: number,
   ): Promise<void> {
     if (this.descendants?.isTrackingUnavailable(id)) {
+      this.killTerminal(terminal, "SIGTERM");
+      if (!(await waitForExit(Math.min(gracefulTimeoutMs, 200)))) {
+        this.killTerminal(terminal, "SIGKILL");
+      }
       throw new Error(`PTY ${id} descendant tracking is unavailable`);
     }
 

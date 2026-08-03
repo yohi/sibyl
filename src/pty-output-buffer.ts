@@ -1,4 +1,6 @@
-import { STRING_CONTROL_C1_STARTS, STRING_CONTROL_ESC_STARTS, stripAnsi } from "./ansi-strip.js";
+import { findStringControlStart, STRING_CONTROL_ESC_STARTS, stripAnsi } from "./ansi-strip.js";
+
+const MAX_PENDING_CONTROL_SEQUENCE_LENGTH = 1024;
 
 function advancePastC1StringControl(text: string, start: number): number | undefined {
   const kind = text[start];
@@ -44,17 +46,33 @@ function advancePastCsi(text: string, start: number): number {
   return start;
 }
 
+function dispatchEscSequence(text: string, start: number): { nextCursor?: number; incompleteStart?: number } {
+  const kind = text[start + 1];
+  if (kind === undefined) return { incompleteStart: start };
+
+  if (STRING_CONTROL_ESC_STARTS.some((candidate) => candidate === `\x1b${kind}`)) {
+    const nextCursor = advancePastEscStringControl(text, start);
+    if (nextCursor === undefined) return { incompleteStart: start };
+    return { nextCursor };
+  }
+
+  if (kind === "[") {
+    const nextCursor = advancePastCsi(text, start);
+    if (nextCursor === start) return { incompleteStart: start };
+    return { nextCursor };
+  }
+
+  return { nextCursor: start + 2 };
+}
+
 function findIncompleteEscapeStart(text: string): number | undefined {
   let cursor = 0;
 
   while (cursor < text.length) {
     const start = text.indexOf("\x1b", cursor);
-    const c1Start = STRING_CONTROL_C1_STARTS.map((control) => text.indexOf(control, cursor))
-      .filter((index) => index !== -1)
-      .reduce<number | undefined>(
-        (first, index) => (first === undefined ? index : Math.min(first, index)),
-        undefined,
-      );
+    const c1StartCandidate = findStringControlStart(text, cursor);
+    const c1Start = Number.isFinite(c1StartCandidate) ? c1StartCandidate : undefined;
+
     if (c1Start !== undefined && (start === -1 || c1Start < start)) {
       const nextCursor = advancePastC1StringControl(text, c1Start);
       if (nextCursor === undefined) return c1Start;
@@ -63,24 +81,9 @@ function findIncompleteEscapeStart(text: string): number | undefined {
     }
     if (start === -1) return undefined;
 
-    const kind = text[start + 1];
-    if (kind === undefined) return start;
-
-    if (STRING_CONTROL_ESC_STARTS.some((candidate) => candidate === `\x1b${kind}`)) {
-      const nextCursor = advancePastEscStringControl(text, start);
-      if (nextCursor === undefined) return start;
-      cursor = nextCursor;
-      continue;
-    }
-
-    if (kind === "[") {
-      const nextCursor = advancePastCsi(text, start);
-      if (nextCursor === start) return start;
-      cursor = nextCursor;
-      continue;
-    }
-
-    cursor = start + 2;
+    const result = dispatchEscSequence(text, start);
+    if (result.incompleteStart !== undefined) return result.incompleteStart;
+    if (result.nextCursor !== undefined) cursor = result.nextCursor;
   }
 
   return undefined;
@@ -97,8 +100,20 @@ export class PtyOutputBuffer {
   append(chunk: string): string {
     const raw = this.pendingControlSequence + chunk;
     const incompleteStart = findIncompleteEscapeStart(raw);
-    const complete = incompleteStart === undefined ? raw : raw.slice(0, incompleteStart);
-    this.pendingControlSequence = incompleteStart === undefined ? "" : raw.slice(incompleteStart);
+    let complete: string;
+    if (incompleteStart === undefined) {
+      complete = raw;
+      this.pendingControlSequence = "";
+    } else {
+      const pending = raw.slice(incompleteStart);
+      if (pending.length > MAX_PENDING_CONTROL_SEQUENCE_LENGTH) {
+        complete = raw;
+        this.pendingControlSequence = "";
+      } else {
+        complete = raw.slice(0, incompleteStart);
+        this.pendingControlSequence = pending;
+      }
+    }
 
     const parts = (this.pendingLine + stripAnsi(complete)).split(/\r?\n/);
     this.pendingLine = parts.pop() ?? "";

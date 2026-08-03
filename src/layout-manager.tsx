@@ -84,7 +84,8 @@ export function createLayoutManagerController(
         return;
       }
       await doTerminate(ptyId).catch(() => {});
-      if (currentHandle !== undefined && currentHandle.id === ptyId) {
+      const postAwaitHandle = ptyHandleByPane.get(paneId);
+      if (postAwaitHandle !== undefined && postAwaitHandle.id === ptyId) {
         ptyHandleByPane.delete(paneId);
       }
     });
@@ -150,7 +151,7 @@ export function createLayoutManagerController(
   const onPtyReady = async (paneId: PaneId, handle: PtyHandle): Promise<void> => {
     // ペインがモデルから既に削除されている場合、受信した PTY は直ちに終了する。
     if (!findPane(model(), paneId)) {
-      await (paneBackend?.terminate(ptyManager, handle.id) ?? ptyManager.terminate(handle.id));
+      await doTerminate(handle.id).catch(() => {});
       return;
     }
     cancelCleanup(paneId);

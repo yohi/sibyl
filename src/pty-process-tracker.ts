@@ -14,12 +14,9 @@ interface ProcessEntry {
 }
 
 async function listProcesses(): Promise<readonly ProcessEntry[]> {
-  const { stdout } = await Promise.race([
-    execFileAsync("ps", ["-eo", "pid=,ppid="]),
-    new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("ps scan timed out")), 500);
-    }),
-  ]);
+  const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid="], {
+    signal: AbortSignal.timeout(500),
+  });
   return stdout.split("\n").flatMap((line) => {
     const [pidText, parentPidText] = line.trim().split(/\s+/, 2);
     const pid = Number(pidText);
@@ -30,12 +27,32 @@ async function listProcesses(): Promise<readonly ProcessEntry[]> {
   });
 }
 
+function expandDescendants(
+  processes: readonly ProcessEntry[],
+  rootPid: number,
+  descendants: Set<number>,
+): void {
+  const parentPids = new Set([rootPid, ...descendants]);
+  let foundDescendant = true;
+
+  while (foundDescendant) {
+    foundDescendant = false;
+    for (const process of processes) {
+      if (parentPids.has(process.parentPid) && !descendants.has(process.pid)) {
+        descendants.add(process.pid);
+        parentPids.add(process.pid);
+        foundDescendant = true;
+      }
+    }
+  }
+}
+
 export class PtyProcessTracker {
   private readonly rootPids = new Map<PtyId, number>();
   private readonly descendantsByPty = new Map<PtyId, Set<number>>();
   private readonly scanErrors = new Map<PtyId, boolean>();
   private scanTimer: ReturnType<typeof setInterval> | undefined;
-  private refreshing = false;
+  private refreshPromise: Promise<void> | undefined;
   private shutdownCount = 0;
   private startupTimer: ReturnType<typeof setTimeout> | undefined;
   private inStartupUntil = 0;
@@ -132,16 +149,16 @@ export class PtyProcessTracker {
       }, STARTUP_SCAN_DURATION_MS);
     }
   }
+
+  private scanIntervalMs(): number {
+    if (this.shutdownCount > 0) return SHUTDOWN_SCAN_INTERVAL_MS;
+    if (Date.now() < this.inStartupUntil) return STARTUP_SCAN_INTERVAL_MS;
+    return PROCESS_SCAN_INTERVAL_MS;
+  }
+
   private ensureScanTimer(): void {
     if (this.scanTimer !== undefined || this.rootPids.size === 0) return;
-    const now = Date.now();
-    const intervalMs =
-      this.shutdownCount > 0
-        ? SHUTDOWN_SCAN_INTERVAL_MS
-        : now < this.inStartupUntil
-          ? STARTUP_SCAN_INTERVAL_MS
-          : PROCESS_SCAN_INTERVAL_MS;
-    this.scanTimer = setInterval(() => void this.refresh(), intervalMs);
+    this.scanTimer = setInterval(() => void this.refresh(), this.scanIntervalMs());
   }
 
   private clearScanTimer(): void {
@@ -150,10 +167,18 @@ export class PtyProcessTracker {
     this.scanTimer = undefined;
   }
 
-  private async refresh(): Promise<void> {
-    if (this.refreshing || this.rootPids.size === 0) return;
-    this.refreshing = true;
+  async refresh(): Promise<void> {
+    if (this.refreshPromise !== undefined) return this.refreshPromise;
+    if (this.rootPids.size === 0) return;
 
+    this.refreshPromise = this.doRefresh().finally(() => {
+      this.refreshPromise = undefined;
+    });
+
+    return this.refreshPromise;
+  }
+
+  private async doRefresh(): Promise<void> {
     try {
       let processes: readonly ProcessEntry[];
       try {
@@ -169,19 +194,7 @@ export class PtyProcessTracker {
         const descendants = this.descendantsByPty.get(id);
         if (descendants === undefined) continue;
 
-        const parentPids = new Set([rootPid, ...descendants]);
-
-        let foundDescendant = true;
-        while (foundDescendant) {
-          foundDescendant = false;
-          for (const process of processes) {
-            if (parentPids.has(process.parentPid) && !descendants.has(process.pid)) {
-              descendants.add(process.pid);
-              parentPids.add(process.pid);
-              foundDescendant = true;
-            }
-          }
-        }
+        expandDescendants(processes, rootPid, descendants);
 
         for (const pid of descendants) {
           if (!activePids.has(pid)) descendants.delete(pid);
@@ -189,8 +202,8 @@ export class PtyProcessTracker {
 
         this.scanErrors.set(id, false);
       }
-    } finally {
-      this.refreshing = false;
+    } catch (error) {
+      this.recordScanError(error);
     }
   }
 

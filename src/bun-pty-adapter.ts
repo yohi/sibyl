@@ -12,6 +12,10 @@ interface BunPtyOptions {
 
 type BunSubprocess = ReturnType<typeof Bun.spawn>;
 
+function toSignalNumber(signal?: string): number | undefined {
+  return signal === "SIGKILL" ? 9 : signal === "SIGTERM" ? 15 : undefined;
+}
+
 class BunPty implements IPty {
   readonly pid: number;
   cols: number;
@@ -24,6 +28,7 @@ class BunPty implements IPty {
   >();
   private readonly subprocess: BunSubprocess;
   private exitEmitted = false;
+  private requestedSignal?: string;
 
   constructor(command: string, args: string[], options: BunPtyOptions) {
     this.process = command;
@@ -96,6 +101,7 @@ class BunPty implements IPty {
   kill(signal?: string): void {
     const normalizedSignal = signal === "SIGTERM" || signal === "SIGKILL" ? signal : undefined;
     if (normalizedSignal !== undefined) {
+      this.requestedSignal = normalizedSignal;
       this.subprocess.kill(normalizedSignal);
     } else {
       this.subprocess.kill();
@@ -112,7 +118,8 @@ class BunPty implements IPty {
     if (this.exitEmitted) return;
     this.exitEmitted = true;
     const exitCode = await this.subprocess.exited;
-    const signalNumber = signal === "SIGKILL" ? 9 : signal === "SIGTERM" ? 15 : undefined;
+    const effectiveSignal = signal ?? this.requestedSignal;
+    const signalNumber = toSignalNumber(effectiveSignal);
     for (const listener of this.exitListeners) {
       listener({ exitCode, signal: signalNumber });
     }

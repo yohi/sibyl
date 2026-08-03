@@ -88,8 +88,6 @@ export class PtyManager {
               buffer.shift();
             }
           }
-        } else {
-          // 購読者がいる場合は emitData に任せる。
         }
         this.emitData(id, data);
       }
@@ -99,6 +97,7 @@ export class PtyManager {
     const exitSub = terminal.onExit((event) => {
       this.exited.add(id);
       this.pendingExit.set(id, event);
+      this.emitExit(id, event);
       void this.disposeExitedPtyIfNoDescendants(id);
     });
     this.exitSubscriptions.set(id, exitSub);

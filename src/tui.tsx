@@ -17,12 +17,11 @@ export function createTuiPlugin(
   ptyManager: TuiPtyManager = new PtyManager(undefined, () => import("node-pty")),
   paneBackend: PaneBackend = new OpenTuiPaneBackend(),
 ): TuiPlugin {
-  const initialRoot = {
-    id: "root",
-    children: [paneBackend.create(defaultPtyOptions)],
-  };
-
   return async (api) => {
+    const initialRoot = {
+      id: "root",
+      children: [paneBackend.create(defaultPtyOptions)],
+    };
     const layout = createLayoutManagerController(ptyManager, initialRoot, paneBackend);
 
     api.route.register([

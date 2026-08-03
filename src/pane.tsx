@@ -22,9 +22,21 @@ export interface PaneProps {
   unmountPane?: (paneId: string) => void;
 }
 
+const paneBufferCache = new Map<string, PtyOutputBuffer>();
+
+function getPaneBuffer(paneId: string, isReuse: boolean): PtyOutputBuffer {
+  let buffer = paneBufferCache.get(paneId);
+  if (!buffer || !isReuse) {
+    buffer = new PtyOutputBuffer(1000);
+    paneBufferCache.set(paneId, buffer);
+  }
+  return buffer;
+}
+
 export function Pane(props: PaneProps) {
-  const outputBuffer = new PtyOutputBuffer(1000);
-  const [outputText, setOutputText] = createSignal("");
+  const isReuse = props.initialPtyHandle !== undefined;
+  const outputBuffer = getPaneBuffer(props.model.id, isReuse);
+  const [outputText, setOutputText] = createSignal(outputBuffer.text());
   const terminalDimensions = useTerminalDimensions();
   const [ptyHandle, setPtyHandle] = createSignal<PtyHandle>();
   let disposed = false;
