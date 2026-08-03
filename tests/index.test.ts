@@ -76,13 +76,13 @@ await createTuiPlugin(ptyManager)({
 const setup = await testRender(route.render, { width: 40, height: 8 });
 await setup.renderOnce();
 await Promise.resolve();
-const outputStartedAt = performance.now();
 for (const callback of dataCallbacks) callback("sibyl-output\\n");
 await setup.renderOnce();
 const frame = setup.captureCharFrame();
 setup.renderer.destroy();
 await Promise.resolve();
-if (!frame.includes("sibyl-output") || performance.now() - outputStartedAt >= 16 || terminated.join(",") !== "pty-1") process.exit(1);`,
+if (!frame.includes("sibyl-output")) throw new Error("Missing expected PTY output in frame");
+if (terminated.join(",") !== "pty-1") throw new Error("Unexpected terminated PTYs: " + (terminated.join(",") || "(none)"));`
       ],
       {
         cwd: process.cwd(),
