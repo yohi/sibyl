@@ -107,13 +107,10 @@ export class PtyTerminator {
       } else {
         await this.terminatePosix(id, terminal, waitForExit, gracefulTimeoutMs);
       }
-      this.dispose(id);
-    } catch (error) {
-      if (this.exited.has(id)) this.dispose(id);
-      throw error;
     } finally {
       exitListener?.dispose();
       this.descendants?.endShutdown();
+      this.dispose(id);
     }
   }
 

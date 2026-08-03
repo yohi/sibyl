@@ -65,7 +65,7 @@ describe("PtyTerminator", () => {
   );
 
   test.skipIf(process.platform === "win32")(
-    "keeps a PTY available for retry when SIGKILL does not emit an exit",
+    "cleans up a PTY after a SIGKILL timeout even without an exit event",
     async () => {
       jest.useFakeTimers();
       try {
@@ -80,7 +80,7 @@ describe("PtyTerminator", () => {
         jest.advanceTimersByTime(20);
 
         await expect(firstTermination).rejects.toThrow("did not exit after SIGKILL");
-        expect(disposed).toBe(false);
+        expect(disposed).toBe(true);
 
         const retry = terminator.terminate("pty-1", 10);
         terminal.emitExit();
