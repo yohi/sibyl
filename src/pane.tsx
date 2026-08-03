@@ -11,11 +11,15 @@ export interface PaneProps {
   ptyManager: PaneSpawner;
   paneBackend?: PaneBackend;
   initialPtyHandle?: PtyHandle;
+  pendingPtyHandle?: Promise<PtyHandle>;
   focused: boolean;
   onFocus: () => void;
-  onPtyReady: (paneId: string, ptyId: PtyId) => Promise<void>;
+  onPtyReady: (paneId: string, handle: PtyHandle) => Promise<void>;
+  onPtySpawn?: (paneId: string, promise: Promise<PtyHandle>) => void;
   onPtyExit?: (paneId: string, ptyId: PtyId) => void;
   onPtyCleanup?: (paneId: string, ptyId: PtyId) => Promise<void> | void;
+  mountPane?: (paneId: string) => void;
+  unmountPane?: (paneId: string) => void;
 }
 
 export function Pane(props: PaneProps) {
@@ -68,19 +72,42 @@ export function Pane(props: PaneProps) {
     });
   };
 
+  const setupPtyHandle = (handle: PtyHandle) => {
+    void props
+      .onPtyReady(props.model.id, handle)
+      .then(() => {
+        if (disposed) {
+          cleanupPty(handle.id);
+          return;
+        }
+        attachPtyHandle(handle);
+      })
+      .catch((error: unknown) => {
+        if (disposed) return;
+        const message = error instanceof Error ? error.message : String(error);
+        appendOutput(`PTY start failed: ${message}\n`);
+      });
+  };
+
   onMount(() => {
+    props.mountPane?.(props.model.id);
     if (!props.model.ptyOptions) return;
 
     const initialHandle = props.initialPtyHandle;
     if (initialHandle !== undefined) {
-      void props
-        .onPtyReady(props.model.id, initialHandle.id)
-        .then(() => {
+      setupPtyHandle(initialHandle);
+      return;
+    }
+
+    const pending = props.pendingPtyHandle;
+    if (pending !== undefined) {
+      void pending
+        .then((handle) => {
           if (disposed) {
-            cleanupPty(initialHandle.id);
+            cleanupPty(handle.id);
             return;
           }
-          attachPtyHandle(initialHandle);
+          setupPtyHandle(handle);
         })
         .catch((error: unknown) => {
           if (disposed) return;
@@ -93,22 +120,14 @@ export function Pane(props: PaneProps) {
     const spawn =
       props.paneBackend?.spawn(props.ptyManager, props.model.ptyOptions) ??
       props.ptyManager.spawn(props.model.ptyOptions);
+    props.onPtySpawn?.(props.model.id, spawn);
     void spawn
       .then(async (handle) => {
         if (disposed) {
           cleanupPty(handle.id);
           return;
         }
-        await props.onPtyReady(props.model.id, handle.id);
-        if (disposed) {
-          cleanupPty(handle.id);
-          return;
-        }
-        const oldHandle = ptyHandle();
-        if (oldHandle !== undefined) {
-          cleanupPty(oldHandle.id);
-        }
-        attachPtyHandle(handle);
+        setupPtyHandle(handle);
       })
       .catch((error: unknown) => {
         if (disposed) return;
@@ -118,6 +137,7 @@ export function Pane(props: PaneProps) {
   });
 
   onCleanup(() => {
+    props.unmountPane?.(props.model.id);
     disposed = true;
     removeDataListener();
     removeExitListener();

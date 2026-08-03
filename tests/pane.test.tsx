@@ -102,7 +102,7 @@ describe("Pane", () => {
     await settlePromises();
 
     // Then
-    expect(onPtyReady).toHaveBeenCalledWith("pane-1", "pty-1");
+    expect(onPtyReady).toHaveBeenCalledWith("pane-1", initialHandle);
     expect(ptyManager.spawnedOptions).toHaveLength(0);
   });
 
@@ -124,6 +124,6 @@ describe("Pane", () => {
 
     // Then
     expect(ptyManager.spawnedOptions).toHaveLength(1);
-    expect(onPtyReady).toHaveBeenCalledWith("pane-1", "fake-pty-1");
+    expect(onPtyReady).toHaveBeenCalledWith("pane-1", expect.objectContaining({ id: "fake-pty-1" }));
   });
 });

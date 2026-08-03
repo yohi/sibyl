@@ -94,7 +94,7 @@ if (!frame.includes("sibyl-output") || performance.now() - outputStartedAt >= 16
     expect(await new Response(child.stderr).text()).toBe("");
   });
 
-  test("replaces the surviving PTY session when split collapse remounts its pane", async () => {
+  test("preserves the surviving PTY session when split collapse remounts its pane", async () => {
     const child = Bun.spawn(
       [
         "bun",
@@ -149,11 +149,11 @@ try {
   await render();
   await run("sibyl.split.horizontal");
   await render();
-  if (nextPtyId !== 3) throw new Error(\`Expected 3 PTY spawns after split, received \${nextPtyId}\`);
+  if (nextPtyId !== 2) throw new Error(\`Expected 2 PTY spawns after split, received \${nextPtyId}\`);
   await run("sibyl.close");
   await render();
-  if (nextPtyId !== 4) throw new Error(\`Expected remounted surviving pane to spawn pty-4, received \${nextPtyId}\`);
-  if (terminated.join(",") !== "pty-1,pty-2,pty-3") throw new Error(\`Unexpected terminated PTYs: \${terminated}\`);
+  if (nextPtyId !== 2) throw new Error(\`Expected surviving pane to keep its original PTY, received \${nextPtyId}\`);
+  if (terminated.join(",") !== "pty-1") throw new Error(\`Unexpected terminated PTYs: \${terminated}\`);
 } finally {
   setup.renderer.destroy();
   await Promise.resolve();

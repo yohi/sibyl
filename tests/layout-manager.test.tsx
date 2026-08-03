@@ -333,7 +333,7 @@ describe("LayoutManager", () => {
     const layout = createLayoutManagerController(ptyManager, nestedModel);
     const pty = await ptyManager.spawn({ command: "fake-shell", args: [] });
 
-    await layout.onPtyReady("pane-b", pty.id);
+    await layout.onPtyReady("pane-b", pty);
     await layout.closePane("pane-b");
 
     expect(ptyManager.terminatedIds).toEqual([pty.id]);
@@ -348,7 +348,7 @@ describe("LayoutManager", () => {
     expect(layout.focusedId()).toBe("pane-c");
   });
 
-  test("keeps the pane-to-PTY mapping when cleanup termination fails so close can retry", async () => {
+  test("retries closePane termination after a failure and clears the mapping", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager");
     let terminationAttempts = 0;
     const ptyManager = {
@@ -361,9 +361,13 @@ describe("LayoutManager", () => {
       id: "pane-a",
       ptyOptions: { command: "fake-shell", args: [] },
     });
-    await layout.onPtyReady("pane-a", "pty-a");
+    await layout.onPtyReady("pane-a", createPtyHandle("pty-a"));
 
-    await expect(layout.onPtyCleanup("pane-a", "pty-a")).rejects.toThrow("PTY did not exit");
+    await expect(layout.closePane("pane-a")).rejects.toThrow("PTY did not exit");
+    // pane-a is removed from the model, but the second close attempt should still terminate the PTY.
+    // Wait for scheduled cleanup to settle before retrying.
+    await Promise.resolve();
+    await Promise.resolve();
     await layout.closePane("pane-a");
 
     expect(terminationAttempts).toBe(2);
@@ -382,7 +386,7 @@ describe("LayoutManager", () => {
     // Simulate a late onPtyReady call after the pane was closed (stale PTY)
     const stalePty = await ptyManager.spawn({ command: "fake-shell", args: [] });
     await layout.closePane("pane-a");
-    await layout.onPtyReady("pane-a", stalePty.id);
+    await layout.onPtyReady("pane-a", stalePty);
 
     // onPtyReady should detect pane absence and terminate the stale PTY immediately
     expect(ptyManager.terminatedIds).toContain(stalePty.id);
@@ -411,9 +415,9 @@ describe("LayoutManager", () => {
     const paneBPty = await ptyManager.spawn({ command: "fake-shell", args: [] });
     const paneCPty = await ptyManager.spawn({ command: "fake-shell", args: [] });
 
-    await layout.onPtyReady("pane-a", paneAPty.id);
-    await layout.onPtyReady("pane-b", paneBPty.id);
-    await layout.onPtyReady("pane-c", paneCPty.id);
+    await layout.onPtyReady("pane-a", paneAPty);
+    await layout.onPtyReady("pane-b", paneBPty);
+    await layout.onPtyReady("pane-c", paneCPty);
     const initialSpawnCount = ptyManager.spawnedOptions.length;
 
     await layout.closePane("pane-c");
@@ -624,7 +628,7 @@ describe("LayoutManager", () => {
     closingPaneCleanup();
     survivingPaneCleanup();
 
-    expect(ptyManager.terminatedIds).toEqual([closingPtyId, survivingPtyId]);
+    expect(ptyManager.terminatedIds).toEqual([closingPtyId]);
     expect(ptyManager.spawnedOptions).toHaveLength(2);
   });
 
