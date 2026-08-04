@@ -268,7 +268,10 @@ describe("PtyManager", () => {
       const fakeNodePty = { spawn: (): IPty => fakePty };
       const processTracker = new PtyProcessTracker(() => process.platform);
       const activePids = jest.spyOn(processTracker, "activePids");
-      activePids.mockResolvedValueOnce([67890]).mockResolvedValueOnce([67890]).mockResolvedValueOnce([]);
+      activePids
+        .mockResolvedValueOnce([67890])
+        .mockResolvedValueOnce([67890])
+        .mockResolvedValueOnce([]);
       const stopSpy = jest.spyOn(processTracker, "stop");
       const manager = new PtyManager(
         async () => fakeNodePty,

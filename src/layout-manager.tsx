@@ -134,7 +134,7 @@ export function createLayoutManagerController(
       if (handle === undefined) return;
       await doTerminate(handle.id);
       ptyHandleByPane.delete(id);
-    })
+    });
 
     const nextModel = closeResult.root ?? { id: model().id, children: [] };
     deletePaneBuffer(id);
