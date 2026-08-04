@@ -248,8 +248,12 @@ export class PtyManager {
       return;
     }
     if (this.exitDisposalTimers.has(id)) return;
-    const previousInterval = this.exitDisposalIntervals.get(id) ?? EXIT_DISPOSAL_INITIAL_INTERVAL_MS;
-    const nextInterval = Math.min(previousInterval * EXIT_DISPOSAL_BACKOFF_MULTIPLIER, EXIT_DISPOSAL_MAX_INTERVAL_MS);
+    const previousInterval =
+      this.exitDisposalIntervals.get(id) ?? EXIT_DISPOSAL_INITIAL_INTERVAL_MS;
+    const nextInterval = Math.min(
+      previousInterval * EXIT_DISPOSAL_BACKOFF_MULTIPLIER,
+      EXIT_DISPOSAL_MAX_INTERVAL_MS,
+    );
     this.exitDisposalIntervals.set(id, nextInterval);
     const timer = setTimeout(() => {
       this.exitDisposalTimers.delete(id);
