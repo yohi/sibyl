@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import type { PaneBackend } from "../src/pane-backend";
 import type { PtyHandle, PtyManager } from "../src/pty-manager";
 import type { PaneModel } from "../src/types";
@@ -297,6 +297,44 @@ describe("LayoutManager", () => {
     });
   });
 
+  test("waits for an in-flight cleanup termination before removing a pane", async () => {
+    // Given
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const terminationStarted = createDeferred<void>();
+    const finishTermination = createDeferred<void>();
+    const ptyManager = {
+      terminate: async () => {
+        terminationStarted.resolve();
+        await finishTermination.promise;
+      },
+    };
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "root",
+      children: [
+        { id: "left", ptyOptions: { command: "fake-shell", args: [] } },
+        { id: "right", ptyOptions: { command: "fake-shell", args: [] } },
+      ],
+    });
+    await layout.onPtyReady("left", createPtyHandle("pty-left"));
+    await layout.onPtyCleanup("left", "pty-left");
+    await terminationStarted.promise;
+
+    // When
+    const closing = layout.closePane("left");
+    let closeSettled = false;
+    closing.then(() => {
+      closeSettled = true;
+    });
+    await settlePromises();
+
+    // Then
+    expect(closeSettled).toBe(false);
+    expect(collectPaneIds(layout.model())).toContain("left");
+    finishTermination.resolve();
+    await closing;
+    expect(collectPaneIds(layout.model())).not.toContain("left");
+  });
+
   test("creates split panes through the configured pane backend", async () => {
     // Given
     const { createLayoutManagerController } = await import("../src/layout-manager");
@@ -325,6 +363,44 @@ describe("LayoutManager", () => {
     // Then
     expect(created).toHaveLength(1);
     expect(layout.model().children?.[1]?.id).toBe("backend-pane");
+  });
+
+  test("clears a failed pending spawn so a remount can retry", async () => {
+    // Given
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const ptyManager = new FakePtyManager();
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    });
+    const failedSpawn = Promise.reject<PtyHandle>(new Error("spawn failed"));
+    layout.onPtySpawn("pane-a", failedSpawn);
+
+    // When
+    await failedSpawn.catch(() => {});
+    await settlePromises();
+
+    // Then
+    expect(layout.getPendingPtyHandle("pane-a")).toBeUndefined();
+  });
+
+  test("drops a closed pane output buffer before the pane id is reused", async () => {
+    // Given
+    const paneModule = await import("../src/pane");
+    const deleteBuffer = spyOn(paneModule, "deletePaneBuffer");
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const ptyManager = new FakePtyManager();
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    });
+
+    // When
+    await layout.closePane("pane-a");
+
+    // Then
+    expect(deleteBuffer).toHaveBeenCalledWith("pane-a");
+    deleteBuffer.mockRestore();
   });
 
   test("terminates the closed pane PTY through the controller", async () => {

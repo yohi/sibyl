@@ -24,6 +24,10 @@ export interface PaneProps {
 
 const paneBufferCache = new Map<string, PtyOutputBuffer>();
 
+export function deletePaneBuffer(paneId: string): void {
+  paneBufferCache.delete(paneId);
+}
+
 function getPaneBuffer(paneId: string, isReuse: boolean): PtyOutputBuffer {
   let buffer = paneBufferCache.get(paneId);
   if (!buffer || !isReuse) {
