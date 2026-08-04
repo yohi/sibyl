@@ -1,6 +1,7 @@
 import { STRING_CONTROL_ESC_STARTS, findStringControlStart, stripAnsi } from "./ansi-strip.js";
 
 const MAX_PENDING_CONTROL_SEQUENCE_LENGTH = 1024;
+const MAX_PENDING_LINE_LENGTH_DEFAULT = 100_000;
 
 function advancePastC1StringControl(text: string, start: number): number | undefined {
   const kind = text[start];
@@ -100,12 +101,10 @@ export class PtyOutputBuffer {
 
   constructor(
     private readonly maxLines: number,
-    private readonly maxPendingLineLength = 100_000,
+    private readonly maxPendingLineLength = MAX_PENDING_LINE_LENGTH_DEFAULT,
   ) {
     if (maxPendingLineLength <= 0) {
-      throw new Error(
-        `maxPendingLineLength must be positive, got ${maxPendingLineLength}`,
-      );
+      throw new Error(`maxPendingLineLength must be positive, got ${maxPendingLineLength}`);
     }
   }
 
@@ -130,7 +129,18 @@ export class PtyOutputBuffer {
     const parts = (this.pendingLine + stripAnsi(complete)).split(/\r?\n/);
     this.pendingLine = parts.pop() ?? "";
     if (this.pendingLine.length > this.maxPendingLineLength) {
-      this.pendingLine = this.pendingLine.slice(-this.maxPendingLineLength);
+      // Truncate from the front to keep the most recent output visible for rendering,
+      // unlike pendingControlSequence which is fully discarded because incomplete ANSI
+      // sequences cannot be reliably interpreted.
+      this.pendingLine = this.pendingLine.slice(
+        this.pendingLine.length - this.maxPendingLineLength,
+      );
+    }
+
+    for (let i = 0; i < parts.length; i += 1) {
+      if (parts[i].length > this.maxPendingLineLength) {
+        parts[i] = parts[i].slice(parts[i].length - this.maxPendingLineLength);
+      }
     }
     this.lines.push(...parts);
     if (this.lines.length > this.maxLines) {
