@@ -1,5 +1,6 @@
 const ANSI_PATTERN =
   /\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|\]|\^[\\@A-Z[\]^_`a-z{|}~]|_[\\\]^_`a-z{|}~]|\*|[\x80-\x9f])/g; // NOSONAR - ESC is required to remove ANSI sequences.
+const C1_CSI_PATTERN = /\x9b[0-?]*[ -/]*[@-~]/g;
 const NON_RENDERING_C0_PATTERN = /[\x00-\x08\x0b-\x0c\x0e-\x1f\x7f]/g;
 const NON_RENDERING_C1_PATTERN = /[\x80-\x9f]/g;
 
@@ -52,6 +53,7 @@ function stripStringControls(text: string): string {
 export function stripAnsi(text: string): string {
   return stripStringControls(text)
     .replace(ANSI_PATTERN, "")
+    .replace(C1_CSI_PATTERN, "")
     .replace(NON_RENDERING_C0_PATTERN, "")
     .replace(NON_RENDERING_C1_PATTERN, "");
 }

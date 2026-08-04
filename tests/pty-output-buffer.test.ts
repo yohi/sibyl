@@ -63,6 +63,31 @@ describe("PtyOutputBuffer", () => {
     expect(output.text()).toContain("line-999");
   });
 
+  test("discards an oversized string control payload until its terminator", () => {
+    // Given
+    const output = new PtyOutputBuffer(1_000);
+    const payload = "private".repeat(200);
+
+    // When
+    output.append(`before\x1bP${payload}`);
+    output.append("\x1b\\after\n");
+
+    // Then
+    expect(output.text()).toBe("beforeafter\n");
+  });
+
+  test("removes an 8-bit CSI sequence split across PTY data chunks", () => {
+    // Given
+    const output = new PtyOutputBuffer(1_000);
+
+    // When
+    output.append("before\u009b31");
+    output.append("mred\u009b0m after\n");
+
+    // Then
+    expect(output.text()).toBe("beforered after\n");
+  });
+
   test("bounds an unterminated output line", () => {
     // Given
     const output = new PtyOutputBuffer(2, 8);

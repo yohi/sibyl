@@ -47,6 +47,14 @@ function advancePastCsi(text: string, start: number): number {
   return start;
 }
 
+function advancePastC1Csi(text: string, start: number): number {
+  for (let index = start + 1; index < text.length; index += 1) {
+    const code = text.codePointAt(index) ?? 0;
+    if (code >= 0x40 && code <= 0x7e) return index + 1;
+  }
+  return start;
+}
+
 function dispatchEscSequence(
   text: string,
   start: number,
@@ -76,6 +84,18 @@ function findIncompleteEscapeStart(text: string): number | undefined {
     const start = text.indexOf("\x1b", cursor);
     const c1StartCandidate = findStringControlStart(text, cursor);
     const c1Start = Number.isFinite(c1StartCandidate) ? c1StartCandidate : undefined;
+    const c1CsiStart = text.indexOf("\x9b", cursor);
+
+    if (
+      c1CsiStart !== -1 &&
+      (start === -1 || c1CsiStart < start) &&
+      (c1Start === undefined || c1CsiStart < c1Start)
+    ) {
+      const nextCursor = advancePastC1Csi(text, c1CsiStart);
+      if (nextCursor === c1CsiStart) return c1CsiStart;
+      cursor = nextCursor;
+      continue;
+    }
 
     if (c1Start !== undefined && (start === -1 || c1Start < start)) {
       const nextCursor = advancePastC1StringControl(text, c1Start);
@@ -125,8 +145,9 @@ export class PtyOutputBuffer {
     } else {
       const pending = raw.slice(incompleteStart);
       if (pending.length > MAX_PENDING_CONTROL_SEQUENCE_LENGTH) {
-        complete = raw;
-        this.pendingControlSequence = "";
+        complete = raw.slice(0, incompleteStart);
+        this.pendingControlSequence =
+          pending[0] === "\x1b" ? pending.slice(0, 2) : (pending[0] ?? "");
       } else {
         complete = raw.slice(0, incompleteStart);
         this.pendingControlSequence = pending;

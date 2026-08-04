@@ -22,6 +22,10 @@ describe("stripAnsi", () => {
     expect(stripAnsi("before\u0090private\u009cafter")).toBe("beforeafter");
   });
 
+  test("removes 8-bit CSI sequences together with their parameters", () => {
+    expect(stripAnsi("\u009b31mred\u009b0m")).toBe("red");
+  });
+
   test("removes an OSC sequence split across received chunks after buffering", () => {
     const chunks = ["before\x1b]0;title", "\x07after"];
     expect(stripAnsi(chunks.join(""))).toBe("beforeafter");
