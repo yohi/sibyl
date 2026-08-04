@@ -128,13 +128,13 @@ export function createLayoutManagerController(
     if (target === undefined || target.children !== undefined) return;
 
     const closeResult = await closePaneInTree(model(), id, async () => {
-      const handle = ptyHandleByPane.get(id);
-      if (handle === undefined) return;
       cancelCleanup(id);
       pendingSpawns.delete(id);
+      const handle = ptyHandleByPane.get(id);
+      if (handle === undefined) return;
       await doTerminate(handle.id);
       ptyHandleByPane.delete(id);
-    });
+    })
 
     const nextModel = closeResult.root ?? { id: model().id, children: [] };
     deletePaneBuffer(id);

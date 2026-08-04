@@ -467,6 +467,40 @@ describe("LayoutManager", () => {
     // onPtyReady should detect pane absence and terminate the stale PTY immediately
     expect(ptyManager.terminatedIds).toContain(stalePty.id);
   });
+
+  test("clears an unresolved pending spawn before its pane is disposed and reused", async () => {
+    // Given
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const spawnedIds: string[] = [];
+    const ptyManager: Pick<PtyManager, "spawn" | "terminate"> = {
+      spawn: async (options) => {
+        const id = `pty-${spawnedIds.length + 1}`;
+        spawnedIds.push(id);
+        return createPtyHandle(id);
+      },
+      terminate: async () => {},
+    };
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    });
+    const deferredSpawn = createDeferred<PtyHandle>();
+    layout.onPtySpawn("pane-a", deferredSpawn.promise);
+
+    // When: dispose the pane before the pending spawn resolves.
+    await layout.closePane("pane-a");
+
+    // Then: pending spawn is cleared, and reusing the pane id starts fresh.
+    expect(layout.getPendingPtyHandle("pane-a")).toBeUndefined();
+
+    // Simulate a remount/new pane that reuses the same id and resolves a fresh spawn.
+    const freshPty = createPtyHandle("pty-fresh");
+    const freshSpawn = Promise.resolve(freshPty);
+    layout.onPtySpawn("pane-a", freshSpawn);
+    await layout.onPtyReady("pane-a", freshPty);
+
+    expect(layout.getInitialPtyHandle("pane-a")?.id).toBe("pty-fresh");
+  });
   test("terminates the closed pane PTY while preserving untouched branches", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager");
     const model = {
