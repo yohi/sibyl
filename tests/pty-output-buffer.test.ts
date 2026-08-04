@@ -73,4 +73,10 @@ describe("PtyOutputBuffer", () => {
     // Then
     expect(output.text()).toBe("89abcdef");
   });
+
+  test("rejects maxPendingLineLength of 0 to prevent unbounded growth", () => {
+    expect(() => new PtyOutputBuffer(2, 0)).toThrow(
+      "maxPendingLineLength must be positive, got 0",
+    );
+  });
 });

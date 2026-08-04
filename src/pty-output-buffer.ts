@@ -101,7 +101,13 @@ export class PtyOutputBuffer {
   constructor(
     private readonly maxLines: number,
     private readonly maxPendingLineLength = 100_000,
-  ) {}
+  ) {
+    if (maxPendingLineLength <= 0) {
+      throw new Error(
+        `maxPendingLineLength must be positive, got ${maxPendingLineLength}`,
+      );
+    }
+  }
 
   append(chunk: string): string {
     const raw = this.pendingControlSequence + chunk;
