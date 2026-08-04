@@ -93,7 +93,14 @@ function findIncompleteEscapeStart(text: string): number | undefined {
   return undefined;
 }
 
-/** Retains incomplete terminal control sequences and lines between PTY data events. */
+/** Keeps the trailing `maxLength` characters, dropping any leading overflow.
+ * Used to bound a single pending line or completed line segment so rendering
+ * still shows the most recently received output.
+ */
+function truncateFront(line: string, maxLength: number): string {
+  return line.length > maxLength ? line.slice(line.length - maxLength) : line;
+}
+
 export class PtyOutputBuffer {
   private readonly lines: string[] = [];
   private pendingControlSequence = "";
@@ -132,15 +139,11 @@ export class PtyOutputBuffer {
       // Truncate from the front to keep the most recent output visible for rendering,
       // unlike pendingControlSequence which is fully discarded because incomplete ANSI
       // sequences cannot be reliably interpreted.
-      this.pendingLine = this.pendingLine.slice(
-        this.pendingLine.length - this.maxPendingLineLength,
-      );
+      this.pendingLine = truncateFront(this.pendingLine, this.maxPendingLineLength);
     }
 
     for (let i = 0; i < parts.length; i += 1) {
-      if (parts[i].length > this.maxPendingLineLength) {
-        parts[i] = parts[i].slice(parts[i].length - this.maxPendingLineLength);
-      }
+      parts[i] = truncateFront(parts[i], this.maxPendingLineLength);
     }
     this.lines.push(...parts);
     if (this.lines.length > this.maxLines) {
