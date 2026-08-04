@@ -1,6 +1,8 @@
 import type { IPty } from "node-pty";
 import type { PtyId } from "./pty-manager.js";
 
+const FORCED_EXIT_TIMEOUT_MS = 100;
+
 export interface PtyDescendantController {
   isTracking(id: PtyId): boolean;
   knownPids(id: PtyId): readonly number[];
@@ -151,8 +153,7 @@ export class PtyTerminator {
 
     if (terminatedDescendants) {
       this.killTerminal(terminal, "SIGKILL");
-      const remainingMs = Math.max(0, deadline - Date.now());
-      if (!(await waitForExit(remainingMs))) throw new PtyTerminationTimeoutError(id);
+      if (!(await waitForExit(FORCED_EXIT_TIMEOUT_MS))) throw new PtyTerminationTimeoutError(id);
       return;
     }
 
@@ -160,8 +161,7 @@ export class PtyTerminator {
     if (await waitForExit(waitMs)) return;
 
     this.killTerminal(terminal, "SIGKILL");
-    const finalWaitMs = Math.max(0, deadline - Date.now());
-    if (!(await waitForExit(finalWaitMs))) throw new PtyTerminationTimeoutError(id);
+    if (!(await waitForExit(FORCED_EXIT_TIMEOUT_MS))) throw new PtyTerminationTimeoutError(id);
   }
 
   private killTerminal(terminal: IPty, signal?: "SIGTERM" | "SIGKILL"): void {

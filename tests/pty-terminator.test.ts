@@ -34,6 +34,15 @@ class ExitControlledPty implements IPty {
   }
 }
 
+class ExitAfterSigkillPty extends ExitControlledPty {
+  override kill(signal?: string): void {
+    super.kill(signal);
+    if (signal === "SIGKILL") {
+      setTimeout(() => this.emitExit(), 5);
+    }
+  }
+}
+
 describe("PtyTerminator", () => {
   test.skipIf(process.platform === "win32")(
     "waits for a SIGKILL exit before disposing a POSIX PTY",
@@ -77,7 +86,7 @@ describe("PtyTerminator", () => {
         });
 
         const firstTermination = terminator.terminate("pty-1", 10);
-        jest.advanceTimersByTime(20);
+        jest.advanceTimersByTime(110);
 
         await expect(firstTermination).rejects.toThrow("did not exit after SIGKILL");
         expect(disposed).toBe(true);
@@ -90,6 +99,26 @@ describe("PtyTerminator", () => {
       } finally {
         jest.useRealTimers();
       }
+    },
+  );
+
+  test.skipIf(process.platform === "win32")(
+    "allows an asynchronous exit notification after SIGKILL",
+    async () => {
+      // Given
+      const terminal = new ExitAfterSigkillPty();
+      const terminals = new Map([["pty-1", terminal]]);
+      let disposed = false;
+      const terminator = new PtyTerminator(terminals, new Set(), () => {
+        disposed = true;
+      });
+
+      // When
+      await terminator.terminate("pty-1", 10);
+
+      // Then
+      expect(terminal.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(disposed).toBe(true);
     },
   );
 });
