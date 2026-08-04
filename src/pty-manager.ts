@@ -30,6 +30,7 @@ export class PtyManager {
   private nodePtyModule?: Promise<PtyModule>;
   private readonly processTracker;
   private readonly terminator;
+  private readonly exitDisposalTimers = new Map<PtyId, ReturnType<typeof setTimeout>>();
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
@@ -185,6 +186,7 @@ export class PtyManager {
           const buffer = this.pendingData.get(id);
           if (buffer !== undefined) {
             for (const data of buffer) callback(data);
+            this.pendingData.delete(id);
           }
         }
         return originalOnData(callback);
@@ -208,6 +210,9 @@ export class PtyManager {
   }
 
   private dispose(id: PtyId): void {
+    const exitDisposalTimer = this.exitDisposalTimers.get(id);
+    if (exitDisposalTimer !== undefined) clearTimeout(exitDisposalTimer);
+    this.exitDisposalTimers.delete(id);
     this.dataSubscriptions.get(id)?.dispose();
     this.exitSubscriptions.get(id)?.dispose();
     this.dataSubscriptions.delete(id);
@@ -223,9 +228,17 @@ export class PtyManager {
   }
 
   private async disposeExitedPtyIfNoDescendants(id: PtyId): Promise<void> {
-    if ((await this.processTracker.activePids(id)).length === 0 && this.exited.has(id)) {
+    if (!this.exited.has(id)) return;
+    if ((await this.processTracker.activePids(id)).length === 0) {
       this.dispose(id);
+      return;
     }
+    if (this.exitDisposalTimers.has(id)) return;
+    const timer = setTimeout(() => {
+      this.exitDisposalTimers.delete(id);
+      void this.disposeExitedPtyIfNoDescendants(id);
+    }, 25);
+    this.exitDisposalTimers.set(id, timer);
   }
 
   private async loadPtyModule(): Promise<PtyModule> {

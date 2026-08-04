@@ -120,6 +120,29 @@ describe("PtyManager", () => {
     expect(fakePty.killSignals).toEqual([process.platform === "win32" ? undefined : "SIGTERM"]);
   });
 
+  test("replays startup data only to the first subscriber", async () => {
+    // Given
+    const fakePty = new FakePty();
+    const fakeNodePty = { spawn: (): IPty => fakePty };
+    const manager = new PtyManager(
+      async () => fakeNodePty,
+      async () => fakeNodePty,
+    );
+    const pty = await manager.spawn({ command: "fake-shell", args: [] });
+    const firstSubscriber: string[] = [];
+    const secondSubscriber: string[] = [];
+
+    // When
+    const unsubscribe = pty.onData((data) => firstSubscriber.push(data));
+    unsubscribe();
+    pty.onData((data) => secondSubscriber.push(data));
+
+    // Then
+    expect(firstSubscriber).toEqual(["fake: ready\r\n"]);
+    expect(secondSubscriber).toEqual([]);
+    await manager.terminate(pty.id);
+  });
+
   test("sends SIGKILL when SIGTERM does not produce an exit event", async () => {
     if (process.platform === "win32") return;
 
@@ -235,6 +258,40 @@ describe("PtyManager", () => {
 
     expect(stopSpy).toHaveBeenCalledWith(pty.id);
     expect(processTracker.isTracking(pty.id)).toBe(false);
+  });
+
+  test("disposes a naturally exited PTY after its descendants later exit", async () => {
+    // Given
+    jest.useFakeTimers();
+    try {
+      const fakePty = new FakePty(true, { pid: 12345 });
+      const fakeNodePty = { spawn: (): IPty => fakePty };
+      const processTracker = new PtyProcessTracker(() => process.platform);
+      const activePids = jest.spyOn(processTracker, "activePids");
+      activePids.mockResolvedValueOnce([67890]).mockResolvedValueOnce([]);
+      const stopSpy = jest.spyOn(processTracker, "stop");
+      const manager = new PtyManager(
+        async () => fakeNodePty,
+        async () => fakeNodePty,
+        () => process.platform,
+        processTracker,
+      );
+      const pty = await manager.spawn({ command: "fake-shell", args: [] });
+
+      // When
+      fakePty.kill();
+      await Promise.resolve();
+      jest.advanceTimersByTime(25);
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Then
+      expect(activePids).toHaveBeenCalledTimes(2);
+      expect(stopSpy).toHaveBeenCalledWith(pty.id);
+      expect(processTracker.isTracking(pty.id)).toBe(false);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
