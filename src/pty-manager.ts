@@ -6,6 +6,21 @@ import type { PtyOptions } from "./types.js";
 export type PtyId = string;
 type PtyModule = Pick<typeof import("node-pty"), "spawn">;
 
+/** PTY 終了直後に子孫プロセスが残留していないか確認するポーリング間隔。
+ *
+ * 値は `pty-process-tracker.ts` の `SHUTDOWN_SCAN_INTERVAL_MS`（25ms）と同じく、
+ * 子孫プロセスの終了を素早く検出しつつ、ps コールの頻度を抑えるための短間隔。
+ * ただし無制限に 25ms 固定でポーリングし続けると長命な子孫がいる場合に
+ * オーバーヘッドが積もるため、`disposeExitedPtyIfNoDescendants` 内で capped
+ * exponential backoff を適用し、最大でもこの値の倍率までに留める。
+ *
+ * 最大リトライ回数は設けていない。子孫プロセスの監視は `terminate()` による
+ * 明示的な終了要求に委ね、ここではあくまで終了済み PTY のクリーンアップを
+ * 担うため、長命な子孫が存在する限り追跡を継続する。 */
+const EXIT_DISPOSAL_INITIAL_INTERVAL_MS = 25;
+const EXIT_DISPOSAL_MAX_INTERVAL_MS = 2000;
+const EXIT_DISPOSAL_BACKOFF_MULTIPLIER = 2;
+
 export interface PtyHandle {
   id: PtyId;
   write(data: string): void;
@@ -30,6 +45,8 @@ export class PtyManager {
   private nodePtyModule?: Promise<PtyModule>;
   private readonly processTracker;
   private readonly terminator;
+  private readonly exitDisposalTimers = new Map<PtyId, ReturnType<typeof setTimeout>>();
+  private readonly exitDisposalIntervals = new Map<PtyId, number>();
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
@@ -185,6 +202,7 @@ export class PtyManager {
           const buffer = this.pendingData.get(id);
           if (buffer !== undefined) {
             for (const data of buffer) callback(data);
+            this.pendingData.delete(id);
           }
         }
         return originalOnData(callback);
@@ -208,6 +226,10 @@ export class PtyManager {
   }
 
   private dispose(id: PtyId): void {
+    const exitDisposalTimer = this.exitDisposalTimers.get(id);
+    if (exitDisposalTimer !== undefined) clearTimeout(exitDisposalTimer);
+    this.exitDisposalTimers.delete(id);
+    this.exitDisposalIntervals.delete(id);
     this.dataSubscriptions.get(id)?.dispose();
     this.exitSubscriptions.get(id)?.dispose();
     this.dataSubscriptions.delete(id);
@@ -223,9 +245,24 @@ export class PtyManager {
   }
 
   private async disposeExitedPtyIfNoDescendants(id: PtyId): Promise<void> {
-    if ((await this.processTracker.activePids(id)).length === 0 && this.exited.has(id)) {
+    if (!this.exited.has(id)) return;
+    if ((await this.processTracker.activePids(id)).length === 0) {
       this.dispose(id);
+      return;
     }
+    if (this.exitDisposalTimers.has(id)) return;
+    const previousInterval =
+      this.exitDisposalIntervals.get(id) ?? EXIT_DISPOSAL_INITIAL_INTERVAL_MS;
+    const nextInterval = Math.min(
+      previousInterval * EXIT_DISPOSAL_BACKOFF_MULTIPLIER,
+      EXIT_DISPOSAL_MAX_INTERVAL_MS,
+    );
+    this.exitDisposalIntervals.set(id, nextInterval);
+    const timer = setTimeout(() => {
+      this.exitDisposalTimers.delete(id);
+      void this.disposeExitedPtyIfNoDescendants(id);
+    }, previousInterval);
+    this.exitDisposalTimers.set(id, timer);
   }
 
   private async loadPtyModule(): Promise<PtyModule> {

@@ -9,7 +9,7 @@ import {
   splitPane as splitPaneInTree,
 } from "./keymap.js";
 import type { PaneBackend, PanePtyManager } from "./pane-backend.js";
-import { Pane } from "./pane.js";
+import { Pane, deletePaneBuffer } from "./pane.js";
 import type { PtyHandle, PtyManager } from "./pty-manager.js";
 import type { PaneId, PaneModel, PtyOptions, SplitDirection } from "./types.js";
 
@@ -47,7 +47,7 @@ export function createLayoutManagerController(
   const [model, setModel] = createSignal(initialModel);
   const [focusedId, setFocusedId] = createSignal(firstLeafId(initialModel));
   const ptyHandleByPane = new Map<PaneId, PtyHandle>();
-  const terminatedPtyIds = new Set<string>();
+  const terminationsByPtyId = new Map<string, Promise<void>>();
   const pendingSpawns = new Map<PaneId, Promise<PtyHandle>>();
   const cleanupCancellers = new Map<PaneId, () => void>();
   const mountedPaneIds = new Set<PaneId>();
@@ -91,15 +91,18 @@ export function createLayoutManagerController(
     });
   };
 
-  const doTerminate = async (ptyId: string): Promise<void> => {
-    if (terminatedPtyIds.has(ptyId)) return;
-    terminatedPtyIds.add(ptyId);
-    try {
-      await (paneBackend?.terminate(ptyManager, ptyId) ?? ptyManager.terminate(ptyId));
-    } catch (error) {
-      terminatedPtyIds.delete(ptyId);
-      throw error;
-    }
+  const doTerminate = (ptyId: string): Promise<void> => {
+    const current = terminationsByPtyId.get(ptyId);
+    if (current !== undefined) return current;
+
+    const termination = paneBackend?.terminate(ptyManager, ptyId) ?? ptyManager.terminate(ptyId);
+    terminationsByPtyId.set(ptyId, termination);
+    void termination.catch(() => {
+      if (terminationsByPtyId.get(ptyId) === termination) {
+        terminationsByPtyId.delete(ptyId);
+      }
+    });
+    return termination;
   };
 
   const splitPane = (direction: SplitDirection, newPtyOptions: PtyOptions) => {
@@ -125,15 +128,16 @@ export function createLayoutManagerController(
     if (target === undefined || target.children !== undefined) return;
 
     const closeResult = await closePaneInTree(model(), id, async () => {
-      const handle = ptyHandleByPane.get(id);
-      if (handle === undefined) return;
       cancelCleanup(id);
       pendingSpawns.delete(id);
+      const handle = ptyHandleByPane.get(id);
+      if (handle === undefined) return;
       await doTerminate(handle.id);
       ptyHandleByPane.delete(id);
     });
 
     const nextModel = closeResult.root ?? { id: model().id, children: [] };
+    deletePaneBuffer(id);
     setModel(nextModel);
     setFocusedId(closeResult.focusedId ?? firstLeafId(nextModel));
   };
@@ -172,6 +176,11 @@ export function createLayoutManagerController(
 
   const onPtySpawn = (paneId: PaneId, promise: Promise<PtyHandle>): void => {
     pendingSpawns.set(paneId, promise);
+    void promise.catch(() => {
+      if (pendingSpawns.get(paneId) === promise) {
+        pendingSpawns.delete(paneId);
+      }
+    });
   };
 
   const getInitialPtyHandle = (paneId: PaneId): PtyHandle | undefined => {

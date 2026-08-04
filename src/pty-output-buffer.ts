@@ -1,6 +1,7 @@
 import { STRING_CONTROL_ESC_STARTS, findStringControlStart, stripAnsi } from "./ansi-strip.js";
 
 const MAX_PENDING_CONTROL_SEQUENCE_LENGTH = 1024;
+const MAX_PENDING_LINE_LENGTH_DEFAULT = 100_000;
 
 function advancePastC1StringControl(text: string, start: number): number | undefined {
   const kind = text[start];
@@ -92,13 +93,27 @@ function findIncompleteEscapeStart(text: string): number | undefined {
   return undefined;
 }
 
-/** Retains incomplete terminal control sequences and lines between PTY data events. */
+/** Keeps the trailing `maxLength` characters, dropping any leading overflow.
+ * Used to bound a single pending line or completed line segment so rendering
+ * still shows the most recently received output.
+ */
+function truncateFront(line: string, maxLength: number): string {
+  return line.length > maxLength ? line.slice(line.length - maxLength) : line;
+}
+
 export class PtyOutputBuffer {
   private readonly lines: string[] = [];
   private pendingControlSequence = "";
   private pendingLine = "";
 
-  constructor(private readonly maxLines: number) {}
+  constructor(
+    private readonly maxLines: number,
+    private readonly maxPendingLineLength = MAX_PENDING_LINE_LENGTH_DEFAULT,
+  ) {
+    if (maxPendingLineLength <= 0) {
+      throw new Error(`maxPendingLineLength must be positive, got ${maxPendingLineLength}`);
+    }
+  }
 
   append(chunk: string): string {
     const raw = this.pendingControlSequence + chunk;
@@ -120,6 +135,16 @@ export class PtyOutputBuffer {
 
     const parts = (this.pendingLine + stripAnsi(complete)).split(/\r?\n/);
     this.pendingLine = parts.pop() ?? "";
+    if (this.pendingLine.length > this.maxPendingLineLength) {
+      // Truncate from the front to keep the most recent output visible for rendering,
+      // unlike pendingControlSequence which is fully discarded because incomplete ANSI
+      // sequences cannot be reliably interpreted.
+      this.pendingLine = truncateFront(this.pendingLine, this.maxPendingLineLength);
+    }
+
+    for (let i = 0; i < parts.length; i += 1) {
+      parts[i] = truncateFront(parts[i], this.maxPendingLineLength);
+    }
     this.lines.push(...parts);
     if (this.lines.length > this.maxLines) {
       this.lines.splice(0, this.lines.length - this.maxLines);
