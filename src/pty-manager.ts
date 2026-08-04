@@ -261,7 +261,7 @@ export class PtyManager {
     const timer = setTimeout(() => {
       this.exitDisposalTimers.delete(id);
       void this.disposeExitedPtyIfNoDescendants(id);
-    }, nextInterval);
+    }, previousInterval);
     this.exitDisposalTimers.set(id, timer);
   }
 

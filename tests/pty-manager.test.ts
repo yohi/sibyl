@@ -268,7 +268,7 @@ describe("PtyManager", () => {
       const fakeNodePty = { spawn: (): IPty => fakePty };
       const processTracker = new PtyProcessTracker(() => process.platform);
       const activePids = jest.spyOn(processTracker, "activePids");
-      activePids.mockResolvedValueOnce([67890]).mockResolvedValueOnce([]);
+      activePids.mockResolvedValueOnce([67890]).mockResolvedValueOnce([67890]).mockResolvedValueOnce([]);
       const stopSpy = jest.spyOn(processTracker, "stop");
       const manager = new PtyManager(
         async () => fakeNodePty,
@@ -285,7 +285,13 @@ describe("PtyManager", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      // The polling interval now backs off: 25ms -> 50ms after the first retry.
+      // First recheck at 25ms still has descendants.
+      jest.advanceTimersByTime(25);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      // Second recheck at 50ms finally has no descendants.
       jest.advanceTimersByTime(50);
       await Promise.resolve();
       await Promise.resolve();
@@ -293,7 +299,7 @@ describe("PtyManager", () => {
       await Promise.resolve();
 
       // Then
-      expect(activePids).toHaveBeenCalledTimes(2);
+      expect(activePids).toHaveBeenCalledTimes(3);
       expect(stopSpy).toHaveBeenCalledWith(pty.id);
       expect(processTracker.isTracking(pty.id)).toBe(false);
     } finally {
