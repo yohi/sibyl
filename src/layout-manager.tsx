@@ -66,13 +66,13 @@ export function createLayoutManagerController(
     }
   };
 
-  const scheduleCleanup = (paneId: PaneId, ptyId: string): void => {
+  const scheduleCleanup = (paneId: PaneId, ptyId: string): Promise<void> => {
     cancelCleanup(paneId);
     let cancelled = false;
     cleanupCancellers.set(paneId, () => {
       cancelled = true;
     });
-    void Promise.resolve().then(async () => {
+    return Promise.resolve().then(async () => {
       if (cancelled) return;
       cleanupCancellers.delete(paneId);
       const currentHandle = ptyHandleByPane.get(paneId);
@@ -83,7 +83,7 @@ export function createLayoutManagerController(
       ) {
         return;
       }
-      await doTerminate(ptyId).catch(() => {});
+      await doTerminate(ptyId);
       const postAwaitHandle = ptyHandleByPane.get(paneId);
       if (postAwaitHandle?.id === ptyId) {
         ptyHandleByPane.delete(paneId);
@@ -171,7 +171,7 @@ export function createLayoutManagerController(
   const onPtyCleanup = async (paneId: PaneId, ptyId: string): Promise<void> => {
     // レイアウト変更による再マウントでは、cleanup の直後に同じ pane id で Pane が mount し直し、
     // 同じ PTY ハンドルが再利用される。その間にマッピングを削除しないよう、遅延クリーンアップする。
-    scheduleCleanup(paneId, ptyId);
+    await scheduleCleanup(paneId, ptyId);
   };
 
   const onPtySpawn = (paneId: PaneId, promise: Promise<PtyHandle>): void => {

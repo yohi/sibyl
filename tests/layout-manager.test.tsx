@@ -316,7 +316,7 @@ describe("LayoutManager", () => {
       ],
     });
     await layout.onPtyReady("left", createPtyHandle("pty-left"));
-    await layout.onPtyCleanup("left", "pty-left");
+    const cleanup = layout.onPtyCleanup("left", "pty-left");
     await terminationStarted.promise;
 
     // When
@@ -331,8 +331,28 @@ describe("LayoutManager", () => {
     expect(closeSettled).toBe(false);
     expect(collectPaneIds(layout.model())).toContain("left");
     finishTermination.resolve();
-    await closing;
+    await Promise.all([cleanup, closing]);
     expect(collectPaneIds(layout.model())).not.toContain("left");
+  });
+
+  test("reports a deferred pane cleanup termination failure", async () => {
+    // Given
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const ptyManager = {
+      terminate: async () => {
+        throw new Error("cleanup termination failed");
+      },
+    };
+    const layout = createLayoutManagerController(ptyManager, {
+      id: "pane-a",
+      ptyOptions: { command: "fake-shell", args: [] },
+    });
+    await layout.onPtyReady("pane-a", createPtyHandle("pty-a"));
+
+    // When / Then
+    await expect(layout.onPtyCleanup("pane-a", "pty-a")).rejects.toThrow(
+      "cleanup termination failed",
+    );
   });
 
   test("creates split panes through the configured pane backend", async () => {
