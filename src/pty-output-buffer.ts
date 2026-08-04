@@ -98,7 +98,10 @@ export class PtyOutputBuffer {
   private pendingControlSequence = "";
   private pendingLine = "";
 
-  constructor(private readonly maxLines: number) {}
+  constructor(
+    private readonly maxLines: number,
+    private readonly maxPendingLineLength = 100_000,
+  ) {}
 
   append(chunk: string): string {
     const raw = this.pendingControlSequence + chunk;
@@ -120,6 +123,9 @@ export class PtyOutputBuffer {
 
     const parts = (this.pendingLine + stripAnsi(complete)).split(/\r?\n/);
     this.pendingLine = parts.pop() ?? "";
+    if (this.pendingLine.length > this.maxPendingLineLength) {
+      this.pendingLine = this.pendingLine.slice(-this.maxPendingLineLength);
+    }
     this.lines.push(...parts);
     if (this.lines.length > this.maxLines) {
       this.lines.splice(0, this.lines.length - this.maxLines);
