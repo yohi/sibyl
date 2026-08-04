@@ -285,6 +285,13 @@ describe("PtyManager", () => {
       await Promise.resolve();
       await Promise.resolve();
 
+      // The polling interval now backs off: 25ms -> 50ms after the first retry.
+      jest.advanceTimersByTime(50);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
       // Then
       expect(activePids).toHaveBeenCalledTimes(2);
       expect(stopSpy).toHaveBeenCalledWith(pty.id);

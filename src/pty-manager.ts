@@ -6,6 +6,18 @@ import type { PtyOptions } from "./types.js";
 export type PtyId = string;
 type PtyModule = Pick<typeof import("node-pty"), "spawn">;
 
+/** PTY 終了直後に子孫プロセスが残留していないか確認するポーリング間隔。
+ *
+ * 値は `pty-process-tracker.ts` の `SHUTDOWN_SCAN_INTERVAL_MS`（25ms）と同じく、
+ * 子孫プロセスの終了を素早く検出しつつ、ps コールの頻度を抑えるための短間隔。
+ * ただし無制限に 25ms 固定でポーリングし続けると長命な子孫がいる場合に
+ * オーバーヘッドが積もるため、`disposeExitedPtyIfNoDescendants` 内で capped
+ * exponential backoff を適用し、最大でもこの値の倍率までに留める。
+ */
+const EXIT_DISPOSAL_INITIAL_INTERVAL_MS = 25;
+const EXIT_DISPOSAL_MAX_INTERVAL_MS = 2000;
+const EXIT_DISPOSAL_BACKOFF_MULTIPLIER = 2;
+
 export interface PtyHandle {
   id: PtyId;
   write(data: string): void;
@@ -31,6 +43,7 @@ export class PtyManager {
   private readonly processTracker;
   private readonly terminator;
   private readonly exitDisposalTimers = new Map<PtyId, ReturnType<typeof setTimeout>>();
+  private readonly exitDisposalIntervals = new Map<PtyId, number>();
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
@@ -213,6 +226,7 @@ export class PtyManager {
     const exitDisposalTimer = this.exitDisposalTimers.get(id);
     if (exitDisposalTimer !== undefined) clearTimeout(exitDisposalTimer);
     this.exitDisposalTimers.delete(id);
+    this.exitDisposalIntervals.delete(id);
     this.dataSubscriptions.get(id)?.dispose();
     this.exitSubscriptions.get(id)?.dispose();
     this.dataSubscriptions.delete(id);
@@ -234,10 +248,13 @@ export class PtyManager {
       return;
     }
     if (this.exitDisposalTimers.has(id)) return;
+    const previousInterval = this.exitDisposalIntervals.get(id) ?? EXIT_DISPOSAL_INITIAL_INTERVAL_MS;
+    const nextInterval = Math.min(previousInterval * EXIT_DISPOSAL_BACKOFF_MULTIPLIER, EXIT_DISPOSAL_MAX_INTERVAL_MS);
+    this.exitDisposalIntervals.set(id, nextInterval);
     const timer = setTimeout(() => {
       this.exitDisposalTimers.delete(id);
       void this.disposeExitedPtyIfNoDescendants(id);
-    }, 25);
+    }, nextInterval);
     this.exitDisposalTimers.set(id, timer);
   }
 
