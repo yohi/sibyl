@@ -96,7 +96,7 @@ describe("TUI plugin", () => {
     expect(operationBindings?.every((binding) => binding.preventDefault === true)).toBe(true);
   });
 
-  test("returns a dispose handler that awaits PTY termination", async () => {
+  test("returns a dispose promise that settles after PTY termination", async () => {
     // Given
     const tuiModule = await import("../src/tui");
     const factory = Reflect.get(tuiModule, "createTuiPlugin");
@@ -131,16 +131,52 @@ describe("TUI plugin", () => {
     const result = dispose();
 
     // Then
-    // The handler now catches termination failures fire-and-forget.
-    expect(result).toBeUndefined();
+    expect(result).toBeInstanceOf(Promise);
+    if (result === undefined) throw new Error("Dispose did not return a promise");
     let settled = false;
-    termination.promise.then(() => {
+    result.then(() => {
       settled = true;
     });
     await Promise.resolve();
     expect(settled).toBe(false);
     termination.resolve();
-    await termination.promise;
+    await result;
     expect(settled).toBe(true);
+  });
+
+  test("rejects the dispose promise when PTY termination fails", async () => {
+    // Given
+    const disposeHandlers: Array<() => void | Promise<void>> = [];
+    const api = {
+      route: { register: () => () => {} },
+      keymap: { registerLayer: () => () => {} },
+      lifecycle: {
+        onDispose: (handler: () => void | Promise<void>) => {
+          disposeHandlers.push(handler);
+          return () => {};
+        },
+      },
+    };
+    const ptyManager = {
+      spawn: async () => {
+        throw new Error("Spawn is not used during plugin registration");
+      },
+      terminate: async () => {},
+      terminateAll: async () => {
+        throw new Error("termination failed");
+      },
+    };
+    const tuiModule = await import("../src/tui");
+    const tui = tuiModule.createTuiPlugin(ptyManager);
+    await Reflect.apply(tui, undefined, [api, undefined, undefined]);
+    const dispose = disposeHandlers[0];
+    if (!dispose) throw new Error("Dispose handler is missing");
+
+    // When
+    const result = dispose();
+
+    // Then
+    expect(result).toBeInstanceOf(Promise);
+    await expect(result).rejects.toThrow("termination failed");
   });
 });
