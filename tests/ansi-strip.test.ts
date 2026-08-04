@@ -18,6 +18,10 @@ describe("stripAnsi", () => {
     expect(stripAnsi("\x1b]8;;https://example.com\x1b\\link\x1b]8;;\x1b\\")).toBe("link");
   });
 
+  test("removes 8-bit C1 string controls together with their payload", () => {
+    expect(stripAnsi("before\u0090private\u009cafter")).toBe("beforeafter");
+  });
+
   test("removes an OSC sequence split across received chunks after buffering", () => {
     const chunks = ["before\x1b]0;title", "\x07after"];
     expect(stripAnsi(chunks.join(""))).toBe("beforeafter");

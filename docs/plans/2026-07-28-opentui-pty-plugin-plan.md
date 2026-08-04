@@ -1804,3 +1804,18 @@ git commit -m "docs: アーキテクチャと利用方法を追加"
 - `PtyManager` の `emitData` / `emitExit` は Task 3 で `Map<PtyId, Set<callback>>` による複数 handle・複数購読者対応を実装する。
 - `node-pty` の Bun 互換性は CI（Task 11）で検証する。
 - `LayoutManager` の `ptyIdByPane`（`paneId -> ptyId` の追跡マップ）のレース条件について、`Pane.onMount` で `disposed` ガードを追加し（`5880255`）、さらに `createLayoutManagerController.onPtyReady` でペインのモデル存在確認を追加、`onPtyCleanup` で `terminatedPtyIds` セットによる重複防止と孤児 PTY のクリーンアップを実施済み（回帰テスト追加）。
+
+## 是正追記（2026-08-03）
+
+- Task 9のすべてのSibyl key bindingは`preventDefault: true`を指定する。これにより、
+  keymapがペイン操作キーを消費し、フォーカス中の`Pane.useKeyboard`が同じキーをPTYへ
+  書き込まないことを保証する。
+- Task 2の最小表示方式は、CSI/OSCだけでなく、C0制御文字（LF、CR、TABを除く）および
+  DCS/SOS/PM/APCをペイロードごと除去する。`PtyOutputBuffer`は未完了の文字列制御を
+  次チャンクまで保持する。
+- Task 9の`removeLeaf()`は単一子となったsplitノードをその唯一の子へ縮約する。これにより
+  close後のtree shapeは残存leafをrootとする。以前の「単一子splitを保持してPTYを維持する」
+  テスト期待値は廃止する。
+- Task 11のテストは通常スイートに加え、`bun test --conditions=browser --preload
+  @opentui/solid/preload ./tests/pane-render.integration.tsx`を実行する。後者はPTY出力から
+  `Pane`の実描画フレームまでを計測し、コンテンツがフレーム内に適切に反映されることを確認する。

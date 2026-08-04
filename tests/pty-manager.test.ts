@@ -1,9 +1,10 @@
 import { describe, expect, jest, test } from "bun:test";
 import type { IEvent, IPty } from "node-pty";
 import { PtyManager } from "../src/pty-manager";
+import { PtyProcessTracker } from "../src/pty-process-tracker";
 
 class FakePty implements IPty {
-  readonly pid = 1;
+  pid: number;
   readonly cols = 80;
   readonly rows = 24;
   readonly process = "fake-shell";
@@ -17,7 +18,12 @@ class FakePty implements IPty {
     (event: { exitCode: number; signal?: number }) => void
   >();
 
-  constructor(private readonly emitsExitOnKill = true) {}
+  constructor(
+    private readonly emitsExitOnKill = true,
+    { pid = 0 }: { pid?: number } = {},
+  ) {
+    this.pid = pid;
+  }
 
   readonly onData: IEvent<string> = (listener) => {
     const isFirstListener = this.dataListeners.size === 0;
@@ -56,7 +62,7 @@ class FakePty implements IPty {
 
   kill(signal?: string): void {
     this.killSignals.push(signal);
-    if (!this.emitsExitOnKill) return;
+    if (!this.emitsExitOnKill && signal !== "SIGKILL") return;
     for (const listener of [...this.exitListeners]) {
       listener({ exitCode: 0 });
     }
@@ -137,21 +143,99 @@ describe("PtyManager", () => {
     }
   });
 
-  if (process.versions.bun !== undefined) {
-    test("uses the built-in Bun PTY adapter when no adapter is injected", async () => {
-      const manager = new PtyManager(undefined, async () => {
-        throw new Error("node-pty loader invoked");
-      });
-      const expectedError =
-        process.platform === "win32"
-          ? "Bun on Windows does not yet support PTY. Please provide a Bun PTY adapter."
-          : 'Executable not found in $PATH: "fake-shell"';
+  test.skipIf(process.platform === "win32")(
+    "shares an in-flight termination for the same PTY",
+    async () => {
+      // Given
 
-      await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
-        expectedError,
+      jest.useFakeTimers();
+      try {
+        const fakePty = new FakePty(false);
+        const fakeNodePty = { spawn: (): IPty => fakePty };
+        const manager = new PtyManager(
+          async () => fakeNodePty,
+          async () => fakeNodePty,
+        );
+        const pty = await manager.spawn({ command: "fake-shell", args: [] });
+
+        // When
+        const first = manager.terminate(pty.id, 10);
+        const second = manager.terminate(pty.id, 10);
+        jest.advanceTimersByTime(10);
+        await Promise.all([first, second]);
+
+        // Then
+        expect(fakePty.killSignals).toEqual(["SIGTERM", "SIGKILL"]);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  if (process.versions.bun !== undefined) {
+    test("uses the external PTY loader on Bun for Windows", async () => {
+      // Given
+      const fakePty = new FakePty();
+      let loaderCalls = 0;
+      const externalPty = { spawn: (): IPty => fakePty };
+      const manager = new PtyManager(
+        undefined,
+        async () => {
+          loaderCalls += 1;
+          return externalPty;
+        },
+        () => "win32",
       );
+
+      // When
+      const pty = await manager.spawn({ command: "fake-shell", args: [] });
+
+      // Then
+      expect(loaderCalls).toBe(1);
+      await manager.terminate(pty.id);
     });
+
+    test.skipIf(process.platform === "win32")(
+      "uses the built-in Bun PTY adapter when no adapter is injected",
+      async () => {
+        const manager = new PtyManager(undefined, async () => {
+          throw new Error("node-pty loader invoked");
+        });
+
+        await expect(manager.spawn({ command: "fake-shell", args: [] })).rejects.toThrow(
+          'Executable not found in $PATH: "fake-shell"',
+        );
+      },
+    );
   }
+  test("stops process tracking when a PTY exits without exit subscribers", async () => {
+    const fakePty = new FakePty(true, { pid: 12345 });
+    const fakeNodePty = { spawn: (): IPty => fakePty };
+    const processTracker = new PtyProcessTracker(() => process.platform);
+    const stopSpy = jest.spyOn(processTracker, "stop");
+
+    const manager = new PtyManager(
+      async () => fakeNodePty,
+      async () => fakeNodePty,
+      () => process.platform,
+      processTracker,
+    );
+
+    const pty = await manager.spawn({ command: "fake-shell", args: [] });
+    fakePty.kill();
+
+    // activePids または終了処理の解決を待つ。
+    const deadline = Date.now() + 1000;
+    while (
+      (stopSpy.mock.calls.length === 0 || processTracker.isTracking(pty.id)) &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(stopSpy).toHaveBeenCalledWith(pty.id);
+    expect(processTracker.isTracking(pty.id)).toBe(false);
+  });
 });
 
 if (process.versions.bun === undefined) {

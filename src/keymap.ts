@@ -1,5 +1,7 @@
 import type { PaneModel, PtyOptions, SplitDirection } from "./types.js";
 
+export type PaneFactory = (options: PtyOptions) => PaneModel;
+
 let idCounter = 0;
 
 export function splitPane(
@@ -7,9 +9,10 @@ export function splitPane(
   targetId: string,
   direction: SplitDirection,
   newPtyOptions: PtyOptions,
+  createPane?: PaneFactory,
 ): PaneModel {
   const usedIds = new Set(collectNodes(root).map((node) => node.id));
-  return splitPaneAt(root, targetId, direction, newPtyOptions, usedIds);
+  return splitPaneAt(root, targetId, direction, newPtyOptions, usedIds, createPane);
 }
 
 function splitPaneAt(
@@ -18,15 +21,18 @@ function splitPaneAt(
   direction: SplitDirection,
   newPtyOptions: PtyOptions,
   usedIds: Set<string>,
+  createPane?: PaneFactory,
 ): PaneModel {
   if (root.id === targetId && !root.children) {
+    const newPane = createPane?.(newPtyOptions) ?? {
+      id: nextUniqueId(usedIds, "pane"),
+      ptyOptions: newPtyOptions,
+    };
+    usedIds.add(newPane.id);
     return {
       id: nextUniqueId(usedIds, "split"),
       direction,
-      children: [
-        { id: root.id, ptyOptions: root.ptyOptions },
-        { id: nextUniqueId(usedIds, "pane"), ptyOptions: newPtyOptions },
-      ],
+      children: [{ id: root.id, ptyOptions: root.ptyOptions }, newPane],
     };
   }
 
@@ -35,7 +41,7 @@ function splitPaneAt(
   return {
     ...root,
     children: root.children.map((child) =>
-      splitPaneAt(child, targetId, direction, newPtyOptions, usedIds),
+      splitPaneAt(child, targetId, direction, newPtyOptions, usedIds, createPane),
     ),
   };
 }

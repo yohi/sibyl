@@ -12,6 +12,12 @@ interface BunPtyOptions {
 
 type BunSubprocess = ReturnType<typeof Bun.spawn>;
 
+function toSignalNumber(signal?: string): number | undefined {
+  if (signal === "SIGKILL") return 9;
+  if (signal === "SIGTERM") return 15;
+  return undefined;
+}
+
 class BunPty implements IPty {
   readonly pid: number;
   cols: number;
@@ -23,6 +29,8 @@ class BunPty implements IPty {
     (event: { exitCode: number; signal?: number }) => void
   >();
   private readonly subprocess: BunSubprocess;
+  private exitEmitted = false;
+  private requestedSignal?: string;
 
   constructor(command: string, args: string[], options: BunPtyOptions) {
     this.process = command;
@@ -53,10 +61,7 @@ class BunPty implements IPty {
           }
         },
         exit: async (_terminal, _exitCode, _signal) => {
-          const exitCode = await this.subprocess.exited;
-          for (const listener of this.exitListeners) {
-            listener({ exitCode, signal: undefined });
-          }
+          await this.emitExit();
           this.subprocess.terminal?.close();
         },
       },
@@ -96,18 +101,31 @@ class BunPty implements IPty {
   }
 
   kill(signal?: string): void {
-    if (signal !== undefined) {
-      this.subprocess.kill(signal as Parameters<BunSubprocess["kill"]>[0]);
+    const normalizedSignal = signal === "SIGTERM" || signal === "SIGKILL" ? signal : undefined;
+    if (normalizedSignal !== undefined) {
+      this.requestedSignal = normalizedSignal;
+      this.subprocess.kill(normalizedSignal);
     } else {
       this.subprocess.kill();
     }
-    this.subprocess.terminal?.close();
+    void this.subprocess.exited.then(() => this.emitExit(normalizedSignal));
   }
 
   // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   pause(): void {}
   // Intentionally empty: required by the IPty contract but not implemented by Bun PTY.
   resume(): void {}
+
+  private async emitExit(signal?: string): Promise<void> {
+    if (this.exitEmitted) return;
+    this.exitEmitted = true;
+    const exitCode = await this.subprocess.exited;
+    const effectiveSignal = signal ?? this.requestedSignal;
+    const signalNumber = toSignalNumber(effectiveSignal);
+    for (const listener of this.exitListeners) {
+      listener({ exitCode, signal: signalNumber });
+    }
+  }
 }
 
 export function createBunPtyAdapter(): PtyModule {

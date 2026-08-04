@@ -1,1 +1,12 @@
-{ "presets": ["solid", "@babel/preset-typescript"] }
+{
+  "presets": [
+    [
+      "solid",
+      {
+        "moduleName": "@opentui/solid",
+        "generate": "universal"
+      }
+    ],
+    "@babel/preset-typescript"
+  ]
+}

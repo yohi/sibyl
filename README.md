@@ -13,14 +13,24 @@
 ```bash
 bun install
 bun run build
-bun test
+bun run test
 ```
 
 ## Installation
 
+`opencode.json`:
+
 ```json
 {
-  "plugin": ["@yohi/sibyl"]
+  "plugin": ["@yohi/sibyl/server"]
+}
+```
+
+`tui.json`:
+
+```json
+{
+  "plugin": ["@yohi/sibyl/tui"]
 }
 ```
 

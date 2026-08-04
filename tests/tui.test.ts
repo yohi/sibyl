@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import plugin from "../src/tui";
 
+import { createDeferred } from "./helpers/deferred";
+
 describe("TUI plugin", () => {
   test("exports default plugin object", () => {
     expect(plugin).toHaveProperty("id");
@@ -55,5 +57,90 @@ describe("TUI plugin", () => {
       ]),
     );
     expect(disposeHandlers).toHaveLength(1);
+  });
+
+  test("marks pane operation bindings as consumed before PTY input handlers run", async () => {
+    // Given
+    const layers: Array<{
+      bindings?: Array<{ readonly cmd?: string; readonly preventDefault?: boolean }>;
+    }> = [];
+    const api = {
+      route: { register: () => () => {}, navigate: () => {} },
+      keymap: {
+        registerLayer: (layer: {
+          bindings?: Array<{ readonly cmd?: string; readonly preventDefault?: boolean }>;
+        }) => {
+          layers.push(layer);
+          return () => {};
+        },
+      },
+      lifecycle: { onDispose: () => () => {} },
+    };
+
+    // When
+    await Reflect.apply(plugin.tui, undefined, [api, undefined, undefined]);
+
+    // Then
+    const operationCommands = new Set([
+      "sibyl.split.horizontal",
+      "sibyl.split.vertical",
+      "sibyl.focus.next",
+      "sibyl.focus.prev",
+      "sibyl.close",
+    ]);
+    const operationBindings = layers[0]?.bindings?.filter((binding) =>
+      operationCommands.has(binding.cmd ?? ""),
+    );
+    expect(operationBindings).toBeArray();
+    expect(operationBindings?.length).toBe(operationCommands.size);
+    expect(operationBindings?.every((binding) => binding.preventDefault === true)).toBe(true);
+  });
+
+  test("returns a dispose handler that awaits PTY termination", async () => {
+    // Given
+    const tuiModule = await import("../src/tui");
+    const factory = Reflect.get(tuiModule, "createTuiPlugin");
+    expect(factory).toBeFunction();
+    if (typeof factory !== "function") throw new Error("TUI plugin factory is missing");
+
+    const termination = createDeferred<void>();
+    const disposeHandlers: Array<() => void | Promise<void>> = [];
+    const api = {
+      route: { register: () => () => {} },
+      keymap: { registerLayer: () => () => {} },
+      lifecycle: {
+        onDispose: (handler: () => void | Promise<void>) => {
+          disposeHandlers.push(handler);
+          return () => {};
+        },
+      },
+    };
+    const ptyManager = {
+      spawn: async () => {
+        throw new Error("Spawn is not used during plugin registration");
+      },
+      terminate: async () => {},
+      terminateAll: () => termination.promise,
+    };
+    const tui = factory(ptyManager);
+    await Reflect.apply(tui, undefined, [api, undefined, undefined]);
+    const dispose = disposeHandlers[0];
+    if (!dispose) throw new Error("Dispose handler is missing");
+
+    // When
+    const result = dispose();
+
+    // Then
+    // The handler now catches termination failures fire-and-forget.
+    expect(result).toBeUndefined();
+    let settled = false;
+    termination.promise.then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    termination.resolve();
+    await termination.promise;
+    expect(settled).toBe(true);
   });
 });

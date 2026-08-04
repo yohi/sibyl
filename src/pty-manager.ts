@@ -1,4 +1,6 @@
 import type { IPty } from "node-pty";
+import { PtyProcessTracker } from "./pty-process-tracker.js";
+import { PtyTerminator } from "./pty-terminator.js";
 import type { PtyOptions } from "./types.js";
 
 export type PtyId = string;
@@ -26,11 +28,24 @@ export class PtyManager {
   private exited = new Set<PtyId>();
   private idCounter = 0;
   private nodePtyModule?: Promise<PtyModule>;
+  private readonly processTracker;
+  private readonly terminator;
 
   constructor(
     private readonly loadBunPtyAdapter?: () => Promise<PtyModule>,
     private readonly loadNodePty: () => Promise<PtyModule> = () => import("node-pty"),
-  ) {}
+    private readonly getPlatform: () => NodeJS.Platform = () => process.platform,
+    processTracker?: PtyProcessTracker,
+  ) {
+    this.processTracker = processTracker ?? new PtyProcessTracker(() => this.getPlatform());
+    this.terminator = new PtyTerminator(
+      this.terminals,
+      this.exited,
+      (id) => this.dispose(id),
+      this.processTracker,
+      () => this.getPlatform(),
+    );
+  }
 
   async spawn(options: PtyOptions): Promise<PtyHandle> {
     const id = `pty-${++this.idCounter}`;
@@ -49,6 +64,8 @@ export class PtyManager {
     });
 
     this.terminals.set(id, terminal);
+    this.processTracker.start(id, terminal.pid);
+    this.terminator.registerExitFallback();
 
     // 新しい購読者が登録される前に発生したデータ/終了イベントを
     // 保持するため、コールバック集合に加えてバッファで蓄積する。
@@ -81,6 +98,7 @@ export class PtyManager {
       this.exited.add(id);
       this.pendingExit.set(id, event);
       this.emitExit(id, event);
+      void this.disposeExitedPtyIfNoDescendants(id);
     });
     this.exitSubscriptions.set(id, exitSub);
 
@@ -89,70 +107,12 @@ export class PtyManager {
     return this.withReplay(id, handle);
   }
 
-  async terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
-    const terminal = this.terminals.get(id);
-    if (!terminal) {
-      this.dispose(id);
-      return;
-    }
-
-    let resolveExit = () => {};
-    const exitPromise = new Promise<void>((resolve) => {
-      resolveExit = resolve;
-    });
-    let exitListener: ReturnType<IPty["onExit"]> | undefined;
-    exitListener = terminal.onExit(() => {
-      exitListener?.dispose();
-      resolveExit();
-    });
-
-    // onExit を先に登録する。すでに終了済みなら待機せずに解決する。
-    if (this.exited.has(id)) {
-      exitListener?.dispose();
-      resolveExit();
-      await exitPromise;
-      this.dispose(id);
-      return;
-    }
-
-    const waitForExit = async (): Promise<boolean> => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      try {
-        return await Promise.race([
-          exitPromise.then(() => true),
-          new Promise<false>((resolve) => {
-            timer = setTimeout(() => resolve(false), gracefulTimeoutMs);
-          }),
-        ]);
-      } finally {
-        if (timer !== undefined) clearTimeout(timer);
-      }
-    };
-
-    try {
-      if (process.platform === "win32") {
-        terminal.kill();
-
-        // node-pty の kill() 後に onExit が来ない場合でもタイマーで解決する。
-        await waitForExit();
-      } else {
-        terminal.kill("SIGTERM");
-
-        if (!(await waitForExit())) {
-          terminal.kill("SIGKILL");
-        }
-      }
-    } catch {
-      // terminal.kill may throw for already-exited processes
-    } finally {
-      exitListener?.dispose();
-      this.dispose(id);
-    }
+  terminate(id: PtyId, gracefulTimeoutMs = 1500): Promise<void> {
+    return this.terminator.terminate(id, gracefulTimeoutMs);
   }
 
   terminateAll(): Promise<void> {
-    const promises = Array.from(this.terminals.keys()).map((id) => this.terminate(id));
-    return Promise.all(promises).then(() => undefined);
+    return this.terminator.terminateAll();
   }
 
   private emitData(_id: PtyId, _data: string): void {
@@ -236,7 +196,11 @@ export class PtyManager {
         if (!exitReplayedCallbacks.has(callback)) {
           exitReplayedCallbacks.add(callback);
           const event = this.pendingExit.get(id);
-          if (event !== undefined) callback(event);
+          if (event !== undefined) {
+            callback(event);
+            void this.disposeExitedPtyIfNoDescendants(id);
+            return () => {};
+          }
         }
         return originalOnExit(callback);
       },
@@ -254,6 +218,14 @@ export class PtyManager {
     this.pendingData.delete(id);
     this.pendingExit.delete(id);
     this.exited.delete(id);
+    this.processTracker.stop(id);
+    this.terminator.unregisterExitFallbackWhenIdle();
+  }
+
+  private async disposeExitedPtyIfNoDescendants(id: PtyId): Promise<void> {
+    if ((await this.processTracker.activePids(id)).length === 0 && this.exited.has(id)) {
+      this.dispose(id);
+    }
   }
 
   private async loadPtyModule(): Promise<PtyModule> {
@@ -261,14 +233,16 @@ export class PtyManager {
       if (this.loadBunPtyAdapter) {
         return this.loadBunPtyAdapter();
       }
-      if (process.platform === "win32") {
-        throw new Error(
-          "Bun on Windows does not yet support PTY. Please provide a Bun PTY adapter.",
-        );
+      if (this.getPlatform() === "win32") {
+        return this.loadExternalPtyModule();
       }
       const { createBunPtyAdapter } = await import("./bun-pty-adapter.js");
       return createBunPtyAdapter();
     }
+    return this.loadExternalPtyModule();
+  }
+
+  private loadExternalPtyModule(): Promise<PtyModule> {
     this.nodePtyModule ??= this.loadNodePty().catch((error: unknown) => {
       this.nodePtyModule = undefined;
       throw new Error("No compatible PTY adapter is available", { cause: error });

@@ -14,7 +14,7 @@ describe("keymap helpers", () => {
     expect(next.children?.[0]?.id).toBe("root");
   });
 
-  test("terminates a leaf before removing it and focuses a remaining pane", async () => {
+  test("collapses a split node to its surviving leaf after closing a sibling", async () => {
     const tree = {
       id: "split-1",
       direction: "horizontal" as const,
@@ -30,10 +30,7 @@ describe("keymap helpers", () => {
     });
 
     expect(terminated).toEqual(["left"]);
-    expect(result.root).toEqual({
-      id: "right",
-      ptyOptions: { command: "bash", args: [] },
-    });
+    expect(result.root).toEqual({ id: "right", ptyOptions: { command: "bash", args: [] } });
     expect(result.focusedId).toBe("right");
   });
 
