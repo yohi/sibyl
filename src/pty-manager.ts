@@ -13,7 +13,10 @@ type PtyModule = Pick<typeof import("node-pty"), "spawn">;
  * ただし無制限に 25ms 固定でポーリングし続けると長命な子孫がいる場合に
  * オーバーヘッドが積もるため、`disposeExitedPtyIfNoDescendants` 内で capped
  * exponential backoff を適用し、最大でもこの値の倍率までに留める。
- */
+ *
+ * 最大リトライ回数は設けていない。子孫プロセスの監視は `terminate()` による
+ * 明示的な終了要求に委ね、ここではあくまで終了済み PTY のクリーンアップを
+ * 担うため、長命な子孫が存在する限り追跡を継続する。 */
 const EXIT_DISPOSAL_INITIAL_INTERVAL_MS = 25;
 const EXIT_DISPOSAL_MAX_INTERVAL_MS = 2000;
 const EXIT_DISPOSAL_BACKOFF_MULTIPLIER = 2;
