@@ -40,7 +40,9 @@ test("renders PTY output within one frame", async () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
     if (emitData === undefined) throw new Error("Pane did not subscribe to PTY output");
 
-    // Warm-up render before measurement to avoid flaky first-frame costs in CI.
+    // This test verifies the PTY output reaches the OpenTUI render tree within
+    // the next frame. The separate pty-render-latency.test.tsx exercises the
+    // 1000-sample statistical requirement (p95 <= 50ms, p99 <= 100ms).
     await view.renderOnce();
 
     // When
