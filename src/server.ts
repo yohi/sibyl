@@ -10,9 +10,7 @@ const server: Plugin = async () => ({
   },
   "command.execute.before": async (input) => {
     if (input.command !== "sibyl") return;
-    // Intentionally no-op: the TUI plugin registers `sibyl.open` and the
-    // host navigates to the Sibyl route. This hook only prevents other
-    // plugins from treating `/sibyl` as an unknown command.
+    // Navigation is handled by the host.
   },
 });
 

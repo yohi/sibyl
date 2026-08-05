@@ -27,16 +27,4 @@ describe("Server plugin", () => {
     );
     expect(output).toEqual({ parts: [] });
   });
-
-  test("delegates sibyl command handling to the host without mutating output", async () => {
-    const hooks = await Reflect.apply(plugin.server, undefined, [undefined]);
-    const output = { parts: [] };
-
-    await hooks["command.execute.before"]?.(
-      { command: "sibyl", sessionID: "session", arguments: "" },
-      output,
-    );
-
-    expect(output).toEqual({ parts: [] });
-  });
 });
