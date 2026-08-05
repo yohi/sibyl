@@ -41,7 +41,7 @@ test("renders PTY output within one frame", async () => {
     if (emitData === undefined) throw new Error("Pane did not subscribe to PTY output");
 
     // This test verifies the PTY output reaches the OpenTUI render tree within
-    // the next frame. The separate pty-render-latency.test.tsx exercises the
+    // the next frame. The separate pty-render-latency.integration.tsx exercises the
     // 1000-sample statistical requirement (p95 <= 50ms, p99 <= 100ms).
     await view.renderOnce();
 
