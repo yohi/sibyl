@@ -1629,11 +1629,6 @@ createEffect(() => {
 })
 ```
 
-> **Note:** As of the current milestone, `useTerminalDimensions()` returns the
-> full terminal size; per-pane dimensions require a future OpenTUI API. The
-> implementation resizes each PTY to the terminal dimensions and documents this
-> limitation in `docs/architecture.md`.
-
 - [ ] **Step 4: テストを確認する**
 
 Run: `bun test tests/pty-manager.test.ts`

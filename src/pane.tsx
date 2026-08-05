@@ -48,12 +48,9 @@ export function Pane(props: PaneProps) {
   let removeExitListener = () => {};
 
   createEffect(() => {
-    // OpenTUI Solid currently exposes only the full terminal dimensions via
-    // useTerminalDimensions(). The design roadmap calls for per-pane sizing
-    // (flex-basis / Yoga layout), but until an API is available each Pane
-    // receives the terminal-wide cols/rows. This satisfies the plan's
-    // "terminal dimensions -> PTY size" sync requirement with the documented
-    // limitation that split panes share the same size temporarily.
+    // OpenTUI does not currently expose per-pane dimensions, so we fall back
+    // to the full terminal size. When a pane-level size API becomes available,
+    // replace terminalDimensions() with that measurement.
     const { width, height } = terminalDimensions();
     const cols = Math.floor(width);
     const rows = Math.floor(height);
