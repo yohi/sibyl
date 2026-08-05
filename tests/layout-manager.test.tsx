@@ -467,10 +467,7 @@ describe("LayoutManager", () => {
     await layout.closePane("pane-a");
 
     expect(terminationAttempts).toBe(2);
-    const root = layout.model();
-    expect(root.children).toBeUndefined();
-    expect(root.id).not.toBe("pane-a");
-    expect(root.ptyOptions).toBeDefined();
+    expect(layout.model().children).toEqual([]);
   });
 
   test("terminates a stale PTY when the pane was removed before spawn resolved", async () => {
@@ -491,7 +488,7 @@ describe("LayoutManager", () => {
     expect(ptyManager.terminatedIds).toContain(stalePty.id);
   });
 
-  test("clears an unresolved pending spawn before its pane is disposed", async () => {
+  test("clears an unresolved pending spawn before its pane is disposed and reused", async () => {
     // Given
     const { createLayoutManagerController } = await import("../src/layout-manager");
     const spawnedIds: string[] = [];
@@ -513,8 +510,16 @@ describe("LayoutManager", () => {
     // When: dispose the pane before the pending spawn resolves.
     await layout.closePane("pane-a");
 
-    // Then: pending spawn is cleared so a stale PTY cannot be attached later.
+    // Then: pending spawn is cleared, and reusing the pane id starts fresh.
     expect(layout.getPendingPtyHandle("pane-a")).toBeUndefined();
+
+    // Simulate a remount/new pane that reuses the same id and resolves a fresh spawn.
+    const freshPty = createPtyHandle("pty-fresh");
+    const freshSpawn = Promise.resolve(freshPty);
+    layout.onPtySpawn("pane-a", freshSpawn);
+    await layout.onPtyReady("pane-a", freshPty);
+
+    expect(layout.getInitialPtyHandle("pane-a")?.id).toBe("pty-fresh");
   });
   test("terminates the closed pane PTY while preserving untouched branches", async () => {
     const { createLayoutManagerController } = await import("../src/layout-manager");
@@ -948,23 +953,5 @@ describe("LayoutManager", () => {
 
     expect(exited).toEqual([["pane-a", "fake-pty-1"]]);
     expect(ptyManager.writes.get("fake-pty-1")).toEqual([]);
-  });
-  test("replaces the root with a new default shell pane when the last pane closes", async () => {
-    const { createLayoutManagerController } = await import("../src/layout-manager");
-    const terminate = mock(async (_id: string) => {});
-    const layout = createLayoutManagerController(
-      { terminate },
-      { id: "pane-a", ptyOptions: { command: "sh", args: [] } },
-    );
-    await layout.onPtyReady("pane-a", createPtyHandle("pty-a"));
-
-    await layout.closePane("pane-a");
-
-    const root = layout.model();
-    expect(root.children).toBeUndefined();
-    expect(root.id).not.toBe("pane-a");
-    expect(root.ptyOptions).toBeDefined();
-    expect(layout.focusedId()).toBe(root.id);
-    expect(terminate).toHaveBeenCalledTimes(1);
   });
 });

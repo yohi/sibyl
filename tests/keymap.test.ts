@@ -70,19 +70,4 @@ describe("keymap helpers", () => {
 
     expect(next).toBe(subtree);
   });
-  test("returns a fresh default shell pane when closing the only leaf", async () => {
-    const tree = { id: "pane-a", ptyOptions: { command: "bash", args: [] } };
-    const terminated: string[] = [];
-
-    const result = await closePane(tree, "pane-a", async (leaf) => {
-      terminated.push(leaf.id);
-    });
-
-    expect(terminated).toEqual(["pane-a"]);
-    expect(result.root).toBeDefined();
-    expect(result.root?.children).toBeUndefined();
-    expect(result.root?.id).not.toBe("pane-a");
-    expect(result.root?.ptyOptions).toBeDefined();
-    expect(result.focusedId).toBe(result.root?.id);
-  });
 });

@@ -127,7 +127,6 @@ export function createLayoutManagerController(
     const target = findPane(model(), id);
     if (target === undefined || target.children !== undefined) return;
 
-    const oldId = id;
     const closeResult = await closePaneInTree(model(), id, async () => {
       cancelCleanup(id);
       pendingSpawns.delete(id);
@@ -138,7 +137,7 @@ export function createLayoutManagerController(
     });
 
     const nextModel = closeResult.root ?? { id: model().id, children: [] };
-    deletePaneBuffer(oldId);
+    deletePaneBuffer(id);
     setModel(nextModel);
     setFocusedId(closeResult.focusedId ?? firstLeafId(nextModel));
   };
