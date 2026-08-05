@@ -1,10 +1,11 @@
+import { DEFAULT_SHELL_COMMAND } from "./shell.js";
 import type { PaneModel, PtyOptions, SplitDirection } from "./types.js";
 
 export function createDefaultShellPane(options?: { id?: string }): PaneModel {
   return {
     id: options?.id ?? "pane-0",
     ptyOptions: {
-      command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
+      command: DEFAULT_SHELL_COMMAND,
       args: [],
     },
   };

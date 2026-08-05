@@ -4,10 +4,11 @@ import { LayoutManager, createLayoutManagerController } from "./layout-manager.j
 import { OpenTuiPaneBackend } from "./opentui-pane-backend.js";
 import type { PaneBackend } from "./pane-backend.js";
 import { PtyManager } from "./pty-manager.js";
+import { DEFAULT_SHELL_COMMAND } from "./shell.js";
 import type { PtyOptions } from "./types.js";
 
 const defaultPtyOptions = {
-  command: process.platform === "win32" ? "cmd.exe" : process.env.SHELL || "sh",
+  command: DEFAULT_SHELL_COMMAND,
   args: [],
 } satisfies PtyOptions;
 
