@@ -1,4 +1,15 @@
+import { DEFAULT_SHELL_COMMAND } from "./shell.js";
 import type { PaneModel, PtyOptions, SplitDirection } from "./types.js";
+
+export function createDefaultShellPane(options?: { id?: string }): PaneModel {
+  return {
+    id: options?.id ?? "pane-0",
+    ptyOptions: {
+      command: DEFAULT_SHELL_COMMAND,
+      args: [],
+    },
+  };
+}
 
 export type PaneFactory = (options: PtyOptions) => PaneModel;
 
@@ -62,6 +73,11 @@ export async function closePane(
   if (!target) return { root, focusedId: undefined };
 
   await terminateLeaf(target);
+  if (leaves.length === 1) {
+    const usedIds = new Set(collectNodes(root).map((node) => node.id));
+    const freshRoot = createDefaultShellPane({ id: nextUniqueId(usedIds, "pane") });
+    return { root: freshRoot, focusedId: freshRoot.id };
+  }
   const nextRoot = removeLeaf(root, targetId);
   const nextLeaves = nextRoot ? collectLeaves(nextRoot) : [];
   const focusedId = nextLeaves[Math.min(targetIndex, nextLeaves.length - 1)]?.id;
