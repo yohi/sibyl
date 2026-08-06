@@ -48,18 +48,55 @@ test("renders 1000 PTY output samples with p95 <= 50ms and p99 <= 100ms", async 
 
     const samples: number[] = [];
     const totalSamples = 1000;
+    const emitIntervalMs = 10;
+    const capturePollIntervalMs = 5;
+    const captureTimeoutMs = 50_000;
+    const sentAt = new Map<number, number>();
+    const observedSamples = new Set<number>();
+    let nextSampleToObserve = 0;
+    const wait = (durationMs: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, durationMs));
 
-    for (let i = 0; i < totalSamples; i++) {
-      const payload = `sample-${i}\n`;
-      const start = performance.now();
-      emitData(payload);
-      await view.renderOnce();
-      const frame = view.captureCharFrame();
-      const end = performance.now();
-      if (frame.includes(`sample-${i}`)) {
-        samples.push(end - start);
+    const captureDeadline = performance.now() + captureTimeoutMs;
+    const captureFrames = async () => {
+      while (observedSamples.size < totalSamples && performance.now() < captureDeadline) {
+        await view.renderOnce();
+        const frame = view.captureCharFrame();
+        const capturedAt = performance.now();
+
+        while (nextSampleToObserve < totalSamples) {
+          const sampleIndex = nextSampleToObserve;
+          const sampleSentAt = sentAt.get(sampleIndex);
+          if (sampleSentAt === undefined || !frame.includes(`sample-${sampleIndex}`)) break;
+
+          if (!observedSamples.has(sampleIndex)) {
+            observedSamples.add(sampleIndex);
+            samples.push(capturedAt - sampleSentAt);
+          }
+          nextSampleToObserve++;
+        }
+
+        if (observedSamples.size < totalSamples) {
+          await wait(capturePollIntervalMs);
+        }
       }
-    }
+    };
+
+    const emitSamples = async (emitData: (data: string) => void) => {
+      const emissionStartedAt = performance.now();
+      for (let i = 0; i < totalSamples; i++) {
+        const delayMs = emissionStartedAt + i * emitIntervalMs - performance.now();
+        if (delayMs > 0) {
+          await wait(delayMs);
+        }
+
+        const payload = `sample-${i}\n`;
+        sentAt.set(i, performance.now());
+        emitData(payload);
+      }
+    };
+
+    await Promise.all([captureFrames(), emitSamples(emitData)]);
 
     samples.sort((a, b) => a - b);
     const p95 = samples[Math.floor(samples.length * 0.95)];
