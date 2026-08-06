@@ -1,17 +1,23 @@
 {
-  "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "organizeImports": {
-    "enabled": true
-  },
+  "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+  "assist": { "actions": { "source": { "organizeImports": "off" } } },
   "files": {
-    "ignore": [".omo/**", ".nexus/**", "node_modules/**", "dist/**", "coverage/**"]
+    "includes": ["**", "!**/.*", "!**/node_modules", "!**/dist", "!**/coverage"]
   },
   "linter": {
     "enabled": true,
     "rules": {
-      "recommended": true,
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedImports": "off",
+        "noUnusedFunctionParameters": "off"
+      },
       "suspicious": {
-        "noControlCharactersInRegex": "off"
+        "noControlCharactersInRegex": "off",
+        "useBiomeIgnoreFolder": "off"
+      },
+      "a11y": {
+        "noStaticElementInteractions": "off"
       }
     }
   },
