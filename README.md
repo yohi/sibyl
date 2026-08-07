@@ -6,19 +6,28 @@
 
 `sibyl` は、[OpenCode](https://github.com/anomalyco/opencode) 環境下で稼働する複数のエージェントプロセスを一元管理し、**Tmuxなどの外部ツールを一切使うことなく**、単一のターミナル内で動的な画面分割とPTY（疑似端末）制御を完結させるマルチペイン統合コンソールプラグインです。
 
-アニメ『PSYCHO-PASS』の「シビュラシステム」をコンセプトとし、並列して動作するエージェント（脳）たちを一つのTUI空間に統合します。Solid.js + OpenTUI による高速なFlexboxレイアウト制御と PTY アダプター（`node-pty` および Bun 内蔵 POSIX PTY）による非同期プロセス管理により、追加のミドルウェアなしでスムーズなマルチペイン操作環境を提供します。また、監視官プラグイン `akane` と連携し、全ペインの健全性を可視化する中央管制コンソールとして機能します。
+Solid.js + OpenTUI による高速な Flexbox レイアウト制御と PTY アダプター（`node-pty` および Bun 内蔵 POSIX PTY）による非同期プロセス管理により、スムーズなマルチペイン操作環境を提供します。
 
-## Development
+---
 
-```bash
-bun install
-bun run build
-bun run test
-```
+## ⚡ Keybindings & Commands
 
-## Installation
+OpenCode TUI 内で以下のショートカットキーおよびコマンドパレットを利用してペインを操作できます。
 
-`opencode.json`:
+| キーバインド | コマンド ID | 説明 |
+| :--- | :--- | :--- |
+| `ctrl+shift+s` | `sibyl.open` | Sibyl マルチペインコンソールを開く |
+| `ctrl+a h` | `sibyl.split.horizontal` | フォーカス中のペインを横分割（左右） |
+| `ctrl+a v` | `sibyl.split.vertical` | フォーカス中のペインを縦分割（上下） |
+| `ctrl+a n` | `sibyl.focus.next` | 次のペインへフォーカス移動 |
+| `ctrl+a p` | `sibyl.focus.prev` | 前のペインへフォーカス移動 |
+| `ctrl+a x` | `sibyl.close` | フォーカス中のペインを閉じる |
+
+---
+
+## 📦 Installation
+
+`opencode.json` (Server plugin):
 
 ```json
 {
@@ -26,7 +35,7 @@ bun run test
 }
 ```
 
-`tui.json`:
+`tui.json` (TUI plugin):
 
 ```json
 {
@@ -34,6 +43,29 @@ bun run test
 }
 ```
 
-## Usage
+---
 
-OpenCode TUI 内で `ctrl+shift+s` または command palette から `sibyl.open` を実行する。
+## 🛠 Development
+
+```bash
+# 依存関係のインストール
+bun install
+
+# ビルド
+bun run build
+
+# テスト実行
+bun run test
+
+# Biome コードチェック
+bun run lint
+
+# TypeScript 型チェック
+bun run typecheck
+```
+
+---
+
+## 📄 Specification & Architecture
+
+技術仕様および詳細なアーキテクチャについては [SPEC.md](./SPEC.md) および [docs/architecture.md](./docs/architecture.md) を参照してください。
