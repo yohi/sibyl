@@ -34,7 +34,6 @@ export function createTuiPlugin(
       },
     ]);
     api.keymap.registerLayer({
-      mode: "base",
       commands: [
         {
           name: "sibyl.open",
@@ -109,9 +108,11 @@ export function createTuiPlugin(
   };
 }
 
+export const id = "oh-my-opencode.sibyl";
+
 const tui = createTuiPlugin();
 
 export default {
-  id: "oh-my-opencode.sibyl",
+  id,
   tui,
 } satisfies TuiPluginModule;
