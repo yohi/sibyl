@@ -296,7 +296,7 @@ git commit -m "test: PTY出力の描画レイテンシ受入試験を追加"
 **Files:**
 - Modify: `src/pane.tsx:50-64`
 - Modify: `docs/architecture.md:12-16`
-- Modify: `docs/plans/2026-07-28-opentui-pty-plugin-plan.md:21` area
+- Modify: `SPEC.md` and `docs/architecture.md` to record the per-pane dimension limitation
 
 **Interfaces:**
 - No new code interfaces. Produces updated comments and docs.
@@ -330,21 +330,21 @@ Append after line 16:
   per-pane sizing will follow once the underlying framework API is available.
 ```
 
-- [ ] **Step 3: Update `docs/plans/2026-07-28-opentui-pty-plugin-plan.md`**
+- [ ] **Step 3: Update the formal specification**
 
-Find the `useTerminalDimensions` task area and add a note:
+Find the `useTerminalDimensions` limitation in `SPEC.md` and `docs/architecture.md` and add a note:
 
 ```md
 > **Note:** As of the current milestone, `useTerminalDimensions()` returns the
 > full terminal size; per-pane dimensions require a future OpenTUI API. The
 > implementation resizes each PTY to the terminal dimensions and documents this
-> limitation in `docs/architecture.md`.
+> limitation in `docs/architecture.md` and `SPEC.md`.
 ```
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add src/pane.tsx docs/architecture.md docs/plans/2026-07-28-opentui-pty-plugin-plan.md
+git add src/pane.tsx SPEC.md docs/architecture.md
 git commit -m "docs: ペイン単位サイズAPI未提供の制限をコードコメントと設計書に明記"
 ```
 
