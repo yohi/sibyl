@@ -34,10 +34,10 @@ Implemented as an OpenCode plugin: `@opencode-ai/plugin` (server) and
 
 ## Read-Map (progressive disclosure — read only what the task needs)
 
-- `SPEC.md` — formal spec: keymaps, PTY lifecycle, cleanup ownership,
+- `SPEC.md` — formal spec and current source of truth: keymaps, PTY lifecycle, cleanup ownership,
   acceptance criteria (performance, multi-platform), roadmap.
-- `REQUIREMENTS.md` — original requirements and rationale; source of truth for
-  acceptance criteria.
+- `REQUIREMENTS.md` — original requirements and rationale; background and design intent
+  behind the acceptance criteria.
 - `docs/architecture.md` — component structure and known limitations
   (e.g., per-pane PTY sizing).
 - `CHANGELOG.md` — release history; check before assuming a behavior is a bug.

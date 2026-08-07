@@ -11,7 +11,7 @@
 
 ## PTY 出力の表示方式ロードマップ
 
-1. **最小限方式（現在）**: ANSI strip および C0/CSI/OSC 制御コード除去をしてテキスト表示。
+1. **最小限方式（現在）**: ANSI strip および C0/CSI/OSC/DCS/SOS/PM/APC 制御コード除去をしてテキスト表示。詳細は SPEC.md を参照。
 2. **ANSI 解釈方式（将来）**: `xterm-headless` 等で仮想画面を解釈。
 3. **セルマトリクス方式（将来）**: OpenTUI ネイティブにセル状態を書き込む専用 renderable。
 

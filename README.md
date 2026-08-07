@@ -59,6 +59,9 @@ bun run test
 
 # Biome コードチェック
 bun run lint
+
+# TypeScript 型チェック
+bun run typecheck
 ```
 
 ---
