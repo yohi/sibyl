@@ -11,7 +11,7 @@ test.skipIf(process.platform === "win32")(
       // 新セッションへ脱離させる(macOS / Linux 両方に perl は標準搭載)。
       args: [
         "-c",
-        "perl -e 'use POSIX qw(setsid); setsid(); exec @ARGV' sh -c 'trap \"\" HUP TERM; echo CHILD:$$; sleep 30' & sleep 0.2",
+        "perl -e 'use POSIX qw(setsid); setsid(); exec @ARGV' sh -c 'trap \"\" HUP TERM; echo CHILD:$$; sleep 30' & sleep 5",
       ],
     });
 
