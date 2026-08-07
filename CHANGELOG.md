@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.0.1](https://github.com/yohi/sibyl/compare/v1.0.0...v1.0.1) (2026-08-07)
+
+
+### Bug Fixes
+
+* sibyl.open コマンドとキーバインドが動作しない問題を修正 ([8542a74](https://github.com/yohi/sibyl/commit/8542a746036c8e973a3dba6c60b044a0147f1c80))
+* sibyl.open の実行とキーバインドが動作しない問題を修正 ([c680aff](https://github.com/yohi/sibyl/commit/c680aff46f9dba46c0c13205a77da15a8d8a7eed))
+* TUIプラグインのnamed export id追加とkeymap設定を修正 ([7bc7d92](https://github.com/yohi/sibyl/commit/7bc7d92f499d5fd8fc249e46b5ba9cf417fd884c))
+
 ## 1.0.0 (2026-08-06)
 
 
