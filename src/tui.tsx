@@ -28,16 +28,18 @@ export function createTuiPlugin(
     api.route.register([
       {
         name: "sibyl",
-        render: () => (
+        render: ({ params }) => (
           <LayoutManager ptyManager={ptyManager} paneBackend={paneBackend} controller={layout} />
         ),
       },
     ]);
     api.keymap.registerLayer({
+      mode: "base",
       commands: [
         {
           name: "sibyl.open",
           title: "Open Sibyl",
+          desc: "Open the Sibyl multi-pane console",
           category: "Plugin",
           namespace: "palette",
           slashName: "sibyl",
@@ -46,41 +48,61 @@ export function createTuiPlugin(
         {
           name: "sibyl.split.horizontal",
           title: "Split Pane Horizontally",
+          desc: "Split the current pane horizontally",
           category: "Plugin",
           run: () => layout.splitPane("horizontal", defaultPtyOptions),
         },
         {
           name: "sibyl.split.vertical",
           title: "Split Pane Vertically",
+          desc: "Split the current pane vertically",
           category: "Plugin",
           run: () => layout.splitPane("vertical", defaultPtyOptions),
         },
         {
           name: "sibyl.focus.next",
           title: "Focus Next Pane",
+          desc: "Move focus to the next pane",
           category: "Plugin",
           run: () => layout.focusNext(),
         },
         {
           name: "sibyl.focus.prev",
           title: "Focus Previous Pane",
+          desc: "Move focus to the previous pane",
           category: "Plugin",
           run: () => layout.focusPrev(),
         },
         {
           name: "sibyl.close",
           title: "Close Pane",
+          desc: "Close the focused pane",
           category: "Plugin",
           run: () => layout.closePane(),
         },
       ],
       bindings: [
-        { key: "ctrl+shift+s", cmd: "sibyl.open", preventDefault: true },
-        { key: "ctrl+a h", cmd: "sibyl.split.horizontal", preventDefault: true },
-        { key: "ctrl+a v", cmd: "sibyl.split.vertical", preventDefault: true },
-        { key: "ctrl+a n", cmd: "sibyl.focus.next", preventDefault: true },
-        { key: "ctrl+a p", cmd: "sibyl.focus.prev", preventDefault: true },
-        { key: "ctrl+a x", cmd: "sibyl.close", preventDefault: true },
+        { key: "ctrl+shift+s", cmd: "sibyl.open", desc: "Open Sibyl", preventDefault: true },
+        {
+          key: "ctrl+a h",
+          cmd: "sibyl.split.horizontal",
+          desc: "Split horizontally",
+          preventDefault: true,
+        },
+        {
+          key: "ctrl+a v",
+          cmd: "sibyl.split.vertical",
+          desc: "Split vertically",
+          preventDefault: true,
+        },
+        { key: "ctrl+a n", cmd: "sibyl.focus.next", desc: "Focus next pane", preventDefault: true },
+        {
+          key: "ctrl+a p",
+          cmd: "sibyl.focus.prev",
+          desc: "Focus previous pane",
+          preventDefault: true,
+        },
+        { key: "ctrl+a x", cmd: "sibyl.close", desc: "Close pane", preventDefault: true },
       ],
     });
     api.lifecycle.onDispose(() => ptyManager.terminateAll());
