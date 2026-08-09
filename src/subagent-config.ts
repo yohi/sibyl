@@ -109,7 +109,11 @@ export function resolveSubagentConfig(args: ResolveSubagentConfigArgs): Subagent
     sibyl.maxPanes,
   ]);
   const rawMaxPanes =
-    typeof selectedMaxPanes === "string" ? Number(selectedMaxPanes) : selectedMaxPanes;
+    typeof selectedMaxPanes === "string"
+      ? selectedMaxPanes.trim().length === 0
+        ? Number.NaN
+        : Number(selectedMaxPanes)
+      : selectedMaxPanes;
   const parsedMaxPanes =
     selectedMaxPanes === undefined ? { ok: true, value: 4 } : parseMaxPanesValue(rawMaxPanes);
   if (!parsedMaxPanes.ok) return configurationError(args.logger, "maxPanes");

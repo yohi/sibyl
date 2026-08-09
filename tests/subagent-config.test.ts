@@ -117,6 +117,18 @@ describe("subagent configuration", () => {
     ).toThrow();
   });
 
+  test.each(["", " "])("rejects empty maxPanes value %j", (maxPanes) => {
+    // Given / When / Then
+    expect(() =>
+      resolveSubagentConfig({
+        pluginOptions: { maxPanes },
+        hostConfig,
+        env: {},
+        logger: new RecordingLogger(),
+      }),
+    ).toThrow();
+  });
+
   test("rejects selected invalid server URL rather than falling back", () => {
     // Given / When / Then
     expect(() =>
