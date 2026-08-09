@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import plugin from "../src/tui";
+import plugin, { createTuiPlugin } from "../src/tui";
 
 import { createDeferred } from "./helpers/deferred";
 
@@ -178,5 +178,42 @@ describe("TUI plugin", () => {
     // Then
     expect(result).toBeInstanceOf(Promise);
     await expect(result).rejects.toThrow("termination failed");
+  });
+
+  test("invokes the subagent integration factory when provided", async () => {
+    const calls: unknown[] = [];
+    const api = {
+      route: {
+        register: (
+          registeredRoutes: Array<{
+            render: (props: { params: Record<string, string> }) => unknown;
+          }>,
+        ) => {
+          expect(registeredRoutes).toHaveLength(1);
+          return () => {};
+        },
+      },
+      keymap: { registerLayer: () => () => {} },
+      lifecycle: { onDispose: () => () => {} },
+    };
+    const ptyManager = {
+      spawn: async () => {
+        throw new Error("Spawn is not used during plugin registration");
+      },
+      terminate: async () => {},
+      terminateAll: async () => {},
+    };
+    const integration = async (...args: unknown[]) => {
+      calls.push(args);
+      return { enabled: false, stop: async () => {}, resyncNow: async () => {} };
+    };
+
+    await Reflect.apply(createTuiPlugin(ptyManager, undefined, integration), undefined, [
+      api,
+      { enabled: true },
+      undefined,
+    ]);
+
+    expect(calls).toHaveLength(1);
   });
 });
