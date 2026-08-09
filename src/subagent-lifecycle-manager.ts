@@ -57,22 +57,30 @@ export class SubagentLifecycleManager {
 
   async resyncNow(): Promise<void> {
     if (!this.started) return;
-    let sessions: readonly SubagentLikeSession[];
-    try {
-      sessions = await this.deps.sessionClient.list();
-    } catch (error) {
-      this.deps.logger.warn(`[subagent] resync list failed: ${sanitizeError(error)}`);
-      return;
-    }
-    const children = sessions.filter((session) => session.parentID != null);
-    const serverIds = new Set(children.map((session) => session.id));
-    for (const session of children) {
-      if (!this.openTargets.has(session.id)) this.enqueue({ type: "subagent.created", session });
-    }
-    for (const sessionId of this.openTargets.keys()) {
-      if (!serverIds.has(sessionId)) this.enqueue({ type: "subagent.deleted", sessionId });
-    }
-    await this.drain();
+    await this.enqueueJob(async () => {
+      if (!this.started) return;
+      let sessions: readonly SubagentLikeSession[];
+      try {
+        sessions = await this.deps.sessionClient.list();
+      } catch (error) {
+        this.deps.logger.warn(`[subagent] resync list failed: ${sanitizeError(error)}`);
+        return;
+      }
+      const children = sessions.filter((session) => session.parentID != null);
+      const serverIds = new Set(children.map((session) => session.id));
+      const openPaneIds = this.deps.paneManager.listOpen();
+      for (const session of children) {
+        if (!this.openTargets.has(session.id)) {
+          this.queue.push(() => this.handle({ type: "subagent.created", session }));
+        }
+      }
+      const knownIds = new Set([...openPaneIds, ...this.openTargets.keys()]);
+      for (const sessionId of knownIds) {
+        if (!serverIds.has(sessionId)) {
+          this.queue.push(() => this.handle({ type: "subagent.deleted", sessionId }));
+        }
+      }
+    });
   }
 
   openTargetsForDebug(): ReadonlyMap<string, AttachTarget> {
@@ -81,8 +89,12 @@ export class SubagentLifecycleManager {
 
   private enqueue(event: SubagentEvent): void {
     if (!this.started) return;
-    this.queue.push(() => this.handle(event));
-    void this.drain();
+    void this.enqueueJob(() => this.handle(event));
+  }
+
+  private enqueueJob(job: () => Promise<void>): Promise<void> {
+    this.queue.push(job);
+    return this.drain();
   }
 
   private drain(): Promise<void> {
@@ -140,7 +152,8 @@ export class SubagentLifecycleManager {
   }
 
   private async closed(sessionId: string): Promise<void> {
-    if (!this.openTargets.has(sessionId)) return;
+    if (!this.openTargets.has(sessionId) && !this.deps.paneManager.listOpen().includes(sessionId))
+      return;
     await this.deps.paneManager.close(sessionId);
     this.openTargets.delete(sessionId);
   }

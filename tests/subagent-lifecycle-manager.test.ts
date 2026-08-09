@@ -72,6 +72,26 @@ class MutableSessionClient implements SubagentSessionClient {
   }
 }
 
+class OutOfOrderSessionClient implements SubagentSessionClient {
+  private callCount = 0;
+  private firstResyncResolve: ((sessions: readonly SubagentLikeSession[]) => void) | undefined;
+
+  async list(): Promise<readonly SubagentLikeSession[]> {
+    this.callCount += 1;
+    if (this.callCount === 1) return [child("gone", 1)];
+    if (this.callCount === 2) {
+      return new Promise((resolve) => {
+        this.firstResyncResolve = resolve;
+      });
+    }
+    return [];
+  }
+
+  resolveFirstResync(sessions: readonly SubagentLikeSession[]): void {
+    this.firstResyncResolve?.(sessions);
+  }
+}
+
 class RecordingLogger implements SubagentLogger {
   readonly warnings: string[] = [];
 
@@ -140,6 +160,44 @@ describe("subagent lifecycle manager", () => {
     // Then
     expect(source.started).toBe(true);
     expect(pane.opened).toEqual([{ sessionId: "first", createdAt: 1 }]);
+  });
+
+  test("does not apply an older resync after a newer resync", async () => {
+    // Given
+    const pane = new MemoryPaneManager();
+    const client = new OutOfOrderSessionClient();
+    const { manager } = managerFor({ enabled: true, maxPanes: 2 }, pane, client);
+    await manager.start();
+
+    // When
+    const firstResync = manager.resyncNow();
+    const secondResync = manager.resyncNow();
+    await Promise.resolve();
+    client.resolveFirstResync([child("gone", 1)]);
+    await Promise.all([firstResync, secondResync]);
+
+    // Then
+    expect(pane.opened).toEqual([{ sessionId: "gone", createdAt: 1 }]);
+    expect(pane.closed).toEqual(["gone"]);
+    expect(pane.listOpen()).toEqual([]);
+  });
+
+  test("closes an orphaned pane during initial resync", async () => {
+    // Given
+    const pane = new MemoryPaneManager();
+    await pane.open({ sessionId: "orphan", createdAt: 1 });
+    const { manager } = managerFor(
+      { enabled: true, maxPanes: 2 },
+      pane,
+      new MutableSessionClient([]),
+    );
+
+    // When
+    await manager.start();
+
+    // Then
+    expect(pane.closed).toEqual(["orphan"]);
+    expect(pane.listOpen()).toEqual([]);
   });
 
   test("evicts the oldest pane before opening a new one", async () => {
