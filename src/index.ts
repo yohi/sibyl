@@ -5,3 +5,12 @@ export { closePane, findPane, nextLeaf, prevLeaf, splitPane } from "./keymap.js"
 export type { PaneBackend } from "./pane-backend.js";
 export type { PtyHandle, PtyId } from "./pty-manager.js";
 export type * from "./types.js";
+export * from "./subagent-validation.js";
+export * from "./subagent-logger.js";
+export * from "./subagent-config.js";
+export * from "./subagent-types.js";
+export * from "./subagent-attach-args.js";
+export * from "./subagent-pane-adapter.js";
+export * from "./subagent-event-source.js";
+export * from "./subagent-lifecycle-manager.js";
+export * from "./subagent-integration.js";
