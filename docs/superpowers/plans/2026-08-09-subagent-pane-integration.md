@@ -1935,6 +1935,34 @@ describe("SubagentLifecycleManager", () => {
     expect(closed).toContain("x-1");
   });
 
+  test("resyncNow waits for an event queued while an empty drain is settling", async () => {
+    // Given
+    const { source } = makeSource();
+    const { pane, opened } = makePane();
+    const m = new SubagentLifecycleManager({
+      paneManager: pane,
+      eventSource: source,
+      sessionClient: makeClient([]),
+      config: { enabled: true, maxPanes: 4 },
+      logger,
+    });
+    await m.start();
+
+    // When
+    const resync = m.resyncNow();
+    queueMicrotask(() => {
+      source.emit({
+        type: "subagent.created",
+        session: { id: "late-1", parentID: "p", time: { created: 1 } },
+      });
+    });
+    await resync;
+
+    // Then
+    expect(opened).toContainEqual({ sessionId: "late-1", createdAt: 1 });
+    await m.stop();
+  });
+
   test("root (no parentID) sessions are never opened", async () => {
     const { source, emit } = makeSource();
     const { pane, opened } = makePane();
@@ -2078,16 +2106,23 @@ export class SubagentLifecycleManager {
 
   private drain(): Promise<void> {
     if (this.drainPromise !== undefined) return this.drainPromise;
-    this.drainPromise = (async () => {
-      for (;;) {
-        const job = this.queue.shift();
-        if (job === undefined) return;
-        await job();
+    const drainPromise = (async () => {
+      // Let enqueueEvent() run before observing an initially empty queue.
+      await Promise.resolve();
+      try {
+        for (;;) {
+          const job = this.queue.shift();
+          if (job === undefined) return;
+          await job();
+        }
+      } finally {
+        // Clear the barrier before resolving it so a concurrent enqueue starts
+        // a new drain instead of reusing an already-settled promise.
+        this.drainPromise = undefined;
       }
-    })().finally(() => {
-      this.drainPromise = undefined;
-    });
-    return this.drainPromise;
+    })();
+    this.drainPromise = drainPromise;
+    return drainPromise;
   }
 
   private async handleEvent(event: SubagentEvent): Promise<void> {
