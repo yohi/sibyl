@@ -14,11 +14,22 @@ const defaultPtyOptions = {
 
 type TuiPtyManager = Pick<PtyManager, "spawn" | "terminate" | "terminateAll">;
 
+type SubagentIntegrationFactory = (
+  api: Parameters<TuiPlugin>[0],
+  options: { enabled?: boolean; maxPanes?: number },
+  deps: {
+    layout: ReturnType<typeof createLayoutManagerController>;
+    ptyManager: TuiPtyManager;
+    paneBackend: PaneBackend;
+  },
+) => Promise<{ enabled: boolean; stop(): Promise<void>; resyncNow(): Promise<void> }>;
+
 export function createTuiPlugin(
   ptyManager: TuiPtyManager = new PtyManager(undefined, () => import("node-pty")),
   paneBackend: PaneBackend = new OpenTuiPaneBackend(),
+  subagentIntegrationFactory?: SubagentIntegrationFactory,
 ): TuiPlugin {
-  return async (api) => {
+  return async (api, options) => {
     const initialRoot = {
       id: "root",
       children: [paneBackend.create(defaultPtyOptions)],
@@ -104,6 +115,21 @@ export function createTuiPlugin(
         { key: "ctrl+a x", cmd: "sibyl.close", desc: "Close pane", preventDefault: true },
       ],
     });
+    const runtimeApi = api as unknown as {
+      state?: unknown;
+      client?: unknown;
+      event?: unknown;
+    };
+    if (subagentIntegrationFactory !== undefined || runtimeApi.state !== undefined) {
+      const factory =
+        subagentIntegrationFactory ??
+        (await import("./subagent-integration.js")).attachSubagentIntegration;
+      await factory(api, (options ?? {}) as { enabled?: boolean; maxPanes?: number }, {
+        layout,
+        ptyManager,
+        paneBackend,
+      });
+    }
     api.lifecycle.onDispose(() => ptyManager.terminateAll());
   };
 }
