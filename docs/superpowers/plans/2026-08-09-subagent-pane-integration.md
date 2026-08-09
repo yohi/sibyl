@@ -213,13 +213,20 @@ describe("truncate", () => {
 });
 
 describe("sanitizeError", () => {
-  test("removes URL credentials and caps the final message at 200 characters", () => {
+  test("removes URLs, URL credentials, and caps the final message at 200 characters", () => {
     const message = sanitizeError(
       new Error(`connect https://alice:secret@example.test/path ${"x".repeat(300)}`),
     );
     expect(message).not.toContain("alice");
     expect(message).not.toContain("secret");
     expect(message.length).toBeLessThanOrEqual(200);
+  });
+
+  test("removes plain URLs", () => {
+    const message = sanitizeError(new Error("request failed at https://example.test/api/sessions"));
+
+    expect(message).not.toContain("https://example.test/api/sessions");
+    expect(message).toContain("[redacted-url]");
   });
 });
 ```
@@ -258,7 +265,7 @@ export function truncate(text: string, max = 200): string {
 export function sanitizeError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const withoutCredentials = raw
-    .replace(/https?:\/\/[^\s/@:]+(?::[^\s/@]*)?@[^\s]+/gi, "[redacted-url]")
+    .replace(/https?:\/\/[^\s]+/gi, "[redacted-url]")
     .replace(/\b(password|token|secret|authorization)=\S+/gi, "$1=[redacted]");
   return truncate(withoutCredentials);
 }
@@ -1057,10 +1064,46 @@ readonly forceFocus: (id: PaneId) => void;
 forceFocus: setFocusedId,
 ```
 
-Update the controller implementation so `splitPane` forwards the callback as
-the fifth argument to `splitPaneInTree`. The callback is invoked synchronously
-within the same call stack and its returned `PaneModel` is the pane subsequently
-used by the layout. Update the `makeLayout` test fake to invoke the callback and
+The public controller contract must be changed from the current two-argument
+signature to the following exact type; the callback is optional and synchronous:
+
+```ts
+readonly splitPane: (
+  direction: SplitDirection,
+  newPtyOptions: PtyOptions,
+  createPane?: (options: PtyOptions) => PaneModel,
+) => void;
+```
+
+Update the controller implementation signature accordingly and forward the
+selected factory as the fifth argument to `splitPaneInTree`:
+
+```ts
+const splitPane = (
+  direction: SplitDirection,
+  newPtyOptions: PtyOptions,
+  createPane?: (options: PtyOptions) => PaneModel,
+): void => {
+  // existing focused-pane guards remain unchanged
+  const paneFactory =
+    createPane ?? (paneBackend ? (options) => paneBackend.create(options) : undefined);
+  setModel((current) =>
+    splitPaneInTree(
+      current,
+      focused,
+      direction,
+      newPtyOptions,
+      paneFactory,
+    ),
+  );
+};
+```
+
+When `paneBackend` is configured, preserve its existing default factory when
+the caller does not provide `createPane`; when the caller provides one, forward
+that caller callback unchanged. The callback is invoked synchronously within
+the same call stack and its returned `PaneModel` is the pane subsequently used
+by the layout. Update the `makeLayout` test fake to invoke the callback and
 retain the returned pane id independently from the `forceFocus` assertions.
 
 - [ ] **Step 8: Implement `src/subagent-pane-adapter.ts`**
@@ -2678,7 +2721,7 @@ All 16 requested findings were rechecked against the revised plan:
 10. **Invalid boolean values:** `parseBool` distinguishes absent, valid, and invalid values; the first defined invalid value throws instead of falling back, with a `"maybe"` test.
 11. **Connection resolution:** `resolveConnection` receives `hostConfig`, resolves `serverUrl` and `directory` independently through env → akane → sibyl → plugin input, and never falls back after invalid selection; tests cover both precedence and invalid akane URL.
 12. **Drain barriers:** lifecycle `start()`/`resyncNow()` await `drain()`, while `stop()` disables intake, drains, closes panes, clears tracking, and then stops the event source without premature queue discard.
-13. **Error sanitization:** `sanitizeError` strips URL credentials/credential-like fields and guarantees final output ≤200 characters; adapter, SSE, and lifecycle logs use it.
+13. **Error sanitization:** `sanitizeError` strips all HTTP(S) URLs, credential-like fields, and guarantees final output ≤200 characters; adapter, SSE, and lifecycle logs use it.
 14. **Independent cleanup:** `stop()` uses independent close attempts over `paneManager.listOpen()`, logs each rejection, clears tracking after all attempts, and has a one-failure/multiple-pane test.
 15. **Unused backend import:** Task 7 consumes `PaneBackend`, removes the `OpenTuiPaneBackend` type import and the value-position sentinel.
 16. **SSE cancellation:** subscribe, list, and retry sleep receive an abort signal; lifecycle signal wiring and AbortError-normal shutdown are specified and tested.
