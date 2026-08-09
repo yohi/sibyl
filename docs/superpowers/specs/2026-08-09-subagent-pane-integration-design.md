@@ -33,7 +33,7 @@ oh-my-openagent などの OpenCode プラグインが spawn するサブエー�
 |---|---|---|---|
 | D-1 | **連携方式** | oh-my-openagent を変更せず、OpenCode の `session.created` イベントをフックする。 | 疎結合を保ち、既存プラグインへの影響を最小化するため。 |
 | D-2 | **表示方式** | Phase 1 では `opencode attach <serverUrl> --session <id> --dir <directory> --mini` を仮想端末ペインで実行する。 | akane の設計と整合し、まずは実績のある方法で表示を実現するため。将来的には `xterm-headless` 等でのセルマトリクス表示に移行する可能性がある。 |
-| D-3 | **設定管理** | akane 設定 > 環境変数 > sibyl 設定。**`enabled` / `maxPanes` は項目単位で上位ソースの定義値を採用し、`subagentDisplay` ブロック内の他のキーも同じ優先順位で個別解決する（ブロック単位の置換は行わない）**。 | 単独動作と連携動作の両立のため。 |
+| D-3 | **設定管理** | 環境変数 > akane 設定 > sibyl 設定。**`enabled` / `maxPanes` は項目単位で上位ソースの定義値を採用し、`subagentDisplay` ブロック内の他のキーも同じ優先順位で個別解決する（ブロック単位の置換は行わない）**。 | 単独動作と連携動作の両立のため。 |
 | D-4 | **ペイン数制限** | 上限 4、超過時は最も古いものから evict（akane 準拠）。境界値の扱いは FR-2.1 を参照。 | akane の設計と挙動を揃え、ユーザー体験を統一するため。 |
 | D-5 | **終了時処理** | `session.idle` 受信時、ペインを即座に閉じる。セッション自体の削除は行わない。 | 削除責務は akane にあるため。 |
 | D-6 | **エラー時処理** | `session.error` 受信時、`sessionID` が特定できればペインを閉じる。`sessionID` が無い場合はペインを閉じずログのみ記録する。`session.deleted` 時は cleanup のみ。 | akane 準拠 + SDK（`EventSessionError.sessionID?: string`）の optional 性に対応するため。 |
