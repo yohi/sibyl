@@ -4,7 +4,7 @@
 
 **Goal:** Automatically display and manage subagent sessions (spawned by oh-my-openagent etc.) in Sibyl's own OpenTUI-based panes — without tmux — including lifecycle-driven auto-close, pane-count eviction, and SSE reconnect/resync.
 
-**Architecture:** A new `SubagentLifecycleManager` state machine subscribes to OpenCode events (`session.created/idle/error/deleted`) via the in-process `api.event` bus (default) or direct SSE (`api.client.event.subscribe()`), and drives a new `SubagentPaneAdapter`, which spawns `opencode attach` as a PTY through a `PaneBackend`. Configuration is resolved per-field by `ConfigResolver` (env > akane > sibyl). The TUI plugin owns all wiring and disposes everything via `api.lifecycle.onDispose()`.
+**Architecture:** A new `SubagentLifecycleManager` state machine subscribes to OpenCode events (`session.created/idle/error/deleted`) via the in-process `api.event` bus (default) or direct SSE (`api.client.event.subscribe()`), and drives a new `SubagentPaneAdapter`, which spawns `opencode attach` as a PTY through a `PaneBackend`. Configuration is resolved per-field by `ConfigResolver` (`env > pluginOptions > akane > sibyl` for display settings; `env > akane > sibyl > plugin input` for connection fields). The TUI plugin owns all wiring and disposes everything via `api.lifecycle.onDispose()`.
 
 **Tech Stack:** TypeScript (strict), Solid.js + OpenTUI, Bun (package manager + test runner), Biome (lint/format), `@opencode-ai/plugin@^1.18.8`, `@opencode-ai/sdk@1.18.8`.
 
@@ -27,7 +27,7 @@ Every task's requirements implicitly include this section. Exact values copied v
 - `serverUrl` must be `http://` or `https://`; `sessionID` must match `/^[A-Za-z0-9-]+$/` (spec FR-1.4 input validation; reject invalid before attach).
 - `maxPanes` valid range is integer 1–8 (default 4). `0` means feature-disabled (close all existing subagent panes; open no more; do not evict). Negative/float/NaN/non-integer at the top-priority source → validation error, NO fallback (spec FR-2.1).
 - Credentials never appear in argv or logs: pass via `env.OPENCODE_SERVER_USERNAME`/`env.OPENCODE_SERVER_PASSWORD` only (spec D-9).
-- Config precedence is per-field (not per-block): env > akane (`akane.experimental.watchdog.subagentDisplay`) > sibyl (`sibyl.subagentDisplay`); same rule for `serverUrl`/`directory` (spec D-3/D-8).
+- Config precedence is per-field (not per-block): env > pluginOptions > akane (`akane.experimental.watchdog.subagentDisplay`) > sibyl (`sibyl.subagentDisplay`) for display settings. Connection fields resolve independently as env > akane > sibyl > plugin input, with no fallback after an invalid selected value (spec D-3/D-8).
 - Log sanitization: `sessionId` → first 4 chars + `…` (`slice(0,4)+"…"`); error text truncated to 200 chars; raw username/password values never logged (spec §5/§8).
 
 ---
@@ -38,7 +38,7 @@ New files (one clear responsibility each):
 
 - `src/subagent-validation.ts` — pure validators: `parseMaxPanesValue`, `validateServerUrl`, `validateSessionId`.
 - `src/subagent-logger.ts` — `SubagentLogger` interface + pure `sanitizeSessionId` / `truncate` helpers.
-- `src/subagent-config.ts` — `ConfigResolver`: `resolveSubagentConfig(options, hostConfig, env)` + `resolveConnection(pluginInput, env)`. Pure, DI-testable.
+- `src/subagent-config.ts` — `ConfigResolver`: `resolveSubagentConfig(pluginOptions, hostConfig, env)` + `resolveConnection(pluginInput, hostConfig, env)`. Pure, DI-testable.
 - `src/subagent-types.ts` — `SubagentLikeSession` (structural subtype of SDK `Session`: `id`,`parentID?`,`time.created`), `SubagentSessionClient` (SDK-client subset), `AttachTarget`, `SubagentPaneManager` interfaces, `SubagentConfig`, `ResolvedConnection`.
 - `src/subagent-attach-args.ts` — pure `buildAttachPtyOptions(target, auth, directory)` + `isWindows()`; also (later) `buildSseHeaders`.
 - `src/subagent-pane-adapter.ts` — `SubagentPaneAdapter` (implements `SubagentPaneManager`): idempotent open/close, argv-spawn via `PaneBackend`+`PtyManager`.
@@ -48,7 +48,7 @@ New files (one clear responsibility each):
 
 Modified files:
 
-- `src/layout-manager.tsx` — add `readonly forceFocus: (id: PaneId) => void` to `LayoutManagerController` (delegates to `setFocusedId`; present but unused at this PR boundary).
+- `src/layout-manager.tsx` — add `readonly forceFocus: (id: PaneId) => void` and make `splitPane` accept an optional synchronous `createPane` callback; `forceFocus` delegates to `setFocusedId`.
 - `src/tui.tsx` — feature-flagged wire-up via `attachSubagentIntegration`.
 - `src/server.ts` — register `sibyl.toggleSubagentDisplay` command (no-op on server; visible in palette).
 - `src/index.ts` — re-export new units for consumers.
@@ -106,6 +106,8 @@ describe("subagent-validation", () => {
     test.each([
       ["http://localhost:3000", true],
       ["https://example.com", true],
+      ["https://alice:secret@example.com", false],
+      ["http://alice@example.com", false],
       ["ftp://example.com", false],
       ["not a url", false],
       ["", false],
@@ -147,6 +149,7 @@ export function validateServerUrl(url: string): boolean {
   if (url.length === 0) return false;
   try {
     const parsed = new URL(url);
+    if (parsed.username.length > 0 || parsed.password.length > 0) return false;
     return parsed.protocol === "http:" || parsed.protocol === "https:";
   } catch {
     return false;
@@ -183,14 +186,14 @@ git commit -m "feat: サブエージェント統合用のバリデーション�
 - Test: `tests/subagent-logger.test.ts`
 
 **Interfaces:**
-- Produces (used by Tasks 3/4/5/7): `export interface SubagentLogger { info(m: string): void; warn(m: string): void; error(m: string): void; }`; `export const consoleSubagentLogger: SubagentLogger`; `export function sanitizeSessionId(id: string): string`; `export function truncate(text: string, max = 200): string`.
+- Produces (used by Tasks 3/4/5/6/7): `export interface SubagentLogger { info(m: string): void; warn(m: string): void; error(m: string): void; }`; `export const consoleSubagentLogger: SubagentLogger`; `export function sanitizeSessionId(id: string): string`; `export function truncate(text: string, max = 200): string`; `export function sanitizeError(error: unknown): string`.
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // tests/subagent-logger.test.ts
 import { describe, expect, test } from "bun:test";
-import { sanitizeSessionId, truncate } from "../src/subagent-logger";
+import { sanitizeError, sanitizeSessionId, truncate } from "../src/subagent-logger";
 
 describe("sanitizeSessionId", () => {
   test("masks all but first 4 chars", () => {
@@ -205,7 +208,18 @@ describe("truncate", () => {
     expect(truncate("hello", 200)).toBe("hello");
   });
   test("long text truncated with ellipsis", () => {
-    expect(truncate("x".repeat(250), 200)).toBe(`${"x".repeat(200)}...`);
+    expect(truncate("x".repeat(250), 200)).toBe(`${"x".repeat(197)}...`);
+  });
+});
+
+describe("sanitizeError", () => {
+  test("removes URL credentials and caps the final message at 200 characters", () => {
+    const message = sanitizeError(
+      new Error(`connect https://alice:secret@example.test/path ${"x".repeat(300)}`),
+    );
+    expect(message).not.toContain("alice");
+    expect(message).not.toContain("secret");
+    expect(message.length).toBeLessThanOrEqual(200);
   });
 });
 ```
@@ -237,7 +251,16 @@ export function sanitizeSessionId(id: string): string {
 
 export function truncate(text: string, max = 200): string {
   if (text.length <= max) return text;
-  return `${text.slice(0, max)}...`;
+  if (max < 3) return text.slice(0, Math.max(0, max));
+  return `${text.slice(0, Math.max(0, max - 3))}...`;
+}
+
+export function sanitizeError(error: unknown): string {
+  const raw = error instanceof Error ? error.message : String(error);
+  const withoutCredentials = raw
+    .replace(/https?:\/\/[^\s/@:]+(?::[^\s/@]*)?@[^\s]+/gi, "[redacted-url]")
+    .replace(/\b(password|token|secret|authorization)=\S+/gi, "$1=[redacted]");
+  return truncate(withoutCredentials);
 }
 ```
 
@@ -266,10 +289,11 @@ git commit -m "feat: サブエージェント用のサニタイズ済みロガ�
 
 **Interfaces:**
 - Consumes: `parseMaxPanesValue`, `validateServerUrl` (Task 1); `SubagentLogger` (Task 2); SDK `Config` (type only): `import type { Config as SdkConfig } from "@opencode-ai/sdk"`.
-- Produces (used by Tasks 4/6/7): `export interface SubagentConfig { enabled: boolean; maxPanes: number }`; `export interface ResolvedConnection { serverUrl: string; directory: string; username?: string | undefined; password?: string | undefined }`; `export function resolveSubagentConfig(args: { pluginOptions?: Record<string, unknown> | undefined; hostConfig: SdkConfig; env: Record<string, string | undefined>; logger: SubagentLogger }): SubagentConfig`; `export function resolveConnection(args: { pluginInput: { serverUrl?: string | undefined; directory?: string | undefined }; env: Record<string, string | undefined>; logger: SubagentLogger }): ResolvedConnection`.
+- Produces (used by Tasks 4/6/7): `export interface SubagentConfig { enabled: boolean; maxPanes: number }`; `export interface ResolvedConnection { serverUrl: string; directory: string; username?: string | undefined; password?: string | undefined }`; `export interface SubagentPluginOptions { enabled?: unknown; maxPanes?: unknown }`; `export function resolveSubagentConfig(args: { pluginOptions?: SubagentPluginOptions | undefined; hostConfig: SdkConfig; env: Record<string, string | undefined>; logger: SubagentLogger }): SubagentConfig`; `export function resolveConnection(args: { pluginInput: { serverUrl?: string | undefined; directory?: string | undefined }; hostConfig: SdkConfig; env: Record<string, string | undefined>; logger: SubagentLogger }): ResolvedConnection`.
 
 **Behavior contract (spec D-3/D-8/§6.2, FR-2.1):**
-For each field (`enabled`, `maxPanes`), pick candidate in order **env → akane → sibyl**; use the *first defined* candidate. If the chosen candidate is invalid → log a sanitize-safe error and throw (no fallback). If no candidate defined → default. `SIBYL_SUBAGENT_ENABLED` env values `"1"/"true"/"yes"` → true, `"0"/"false"/"no"` → false (invalid → treated as defined-invalid → throw). `SIBYL_SUBAGENT_MAX_PANES` is parsed via `Number()` then `parseMaxPanesValue`. akane block: `hostConfig.akane?.experimental?.watchdog?.subagentDisplay`; sibyl block: `hostConfig.sibyl?.subagentDisplay` (read via `unknown` narrowing — `SdkConfig` has no `akane`/`sibyl` index).
+For each display field (`enabled`, `maxPanes`), pick candidate in order **env → pluginOptions → akane → sibyl**; use the *first defined* candidate. If the chosen candidate is invalid → log a sanitize-safe error and throw (no fallback). If no candidate is defined → default. `SIBYL_SUBAGENT_ENABLED` env values `"1"/"true"/"yes"` → true, `"0"/"false"/"no"` → false. A defined but unrecognized value such as `"maybe"`, including values from pluginOptions/host config, is invalid and must throw. `SIBYL_SUBAGENT_MAX_PANES` is parsed via `Number()` then `parseMaxPanesValue`. akane block: `hostConfig.akane?.experimental?.watchdog?.subagentDisplay`; sibyl block: `hostConfig.sibyl?.subagentDisplay` (read via `unknown` narrowing — `SdkConfig` has no `akane`/`sibyl` index).
+For `serverUrl` and `directory`, resolve each field independently from **env → akane → sibyl → plugin input**. Read akane connection values from `akane.experimental.watchdog.subagentDisplay.serverUrl` / `.directory` and sibyl values from `sibyl.subagentDisplay.serverUrl` / `.directory`. A defined selected value that is empty, non-string, or an invalid URL is an error and never falls through to a lower layer. Credentials remain env-only.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -308,11 +332,22 @@ describe("resolveSubagentConfig", () => {
     ).toEqual({ enabled: false, maxPanes: 3 });
   });
 
-  test("pluginOptions are ignored (hostConfig is the source of truth)", () => {
-    const pluginOptions = { subagentDisplay: { enabled: true } };
+  test("pluginOptions override akane and sibyl per field", () => {
+    const pluginOptions = { enabled: true, maxPanes: 7 };
+    const hostConfig = {
+      akane: { experimental: { watchdog: { subagentDisplay: { enabled: false, maxPanes: 3 } } } },
+      sibyl: { subagentDisplay: { enabled: false, maxPanes: 2 } },
+    } as never;
     expect(
-      resolveSubagentConfig({ pluginOptions, hostConfig: {}, env: {}, logger }),
-    ).toEqual({ enabled: false, maxPanes: 4 });
+      resolveSubagentConfig({ pluginOptions, hostConfig, env: {}, logger }),
+    ).toEqual({ enabled: true, maxPanes: 7 });
+  });
+
+  test("invalid first-defined enabled value throws instead of falling back", () => {
+    const hostConfig = { sibyl: { subagentDisplay: { enabled: true } } } as never;
+    expect(() =>
+      resolveSubagentConfig({ pluginOptions: { enabled: "maybe" }, hostConfig, env: {}, logger }),
+    ).toThrow();
   });
 
   test("maxPanes=0 via env is accepted and means disabled", () => {
@@ -357,6 +392,7 @@ describe("resolveConnection", () => {
     expect(
       resolveConnection({
         pluginInput: { serverUrl: "http://a", directory: "/d1" },
+        hostConfig: {},
         env: { OPENCODE_SERVER_URL: "http://b", OPENCODE_PROJECT_DIR: "/d2" },
         logger,
       }),
@@ -368,10 +404,36 @@ describe("resolveConnection", () => {
     });
   });
 
+  test("serverUrl and directory resolve independently through akane then sibyl", () => {
+    const hostConfig = {
+      akane: { experimental: { watchdog: { subagentDisplay: { serverUrl: "http://akane" } } } },
+      sibyl: { subagentDisplay: { directory: "/sibyl" } },
+    } as never;
+    expect(
+      resolveConnection({
+        pluginInput: { serverUrl: "http://input", directory: "/input" },
+        hostConfig,
+        env: {},
+        logger,
+      }),
+    ).toMatchObject({ serverUrl: "http://akane", directory: "/sibyl" });
+  });
+
+  test("invalid selected akane serverUrl does not fall back to sibyl", () => {
+    const hostConfig = {
+      akane: { experimental: { watchdog: { subagentDisplay: { serverUrl: "ftp://akane" } } } },
+      sibyl: { subagentDisplay: { serverUrl: "http://sibyl" } },
+    } as never;
+    expect(() =>
+      resolveConnection({ pluginInput: {}, hostConfig, env: {}, logger }),
+    ).toThrow();
+  });
+
   test("invalid OPENCODE_SERVER_URL throws", () => {
     expect(() =>
       resolveConnection({
         pluginInput: {},
+        hostConfig: {},
         env: { OPENCODE_SERVER_URL: "ftp://x" },
         logger,
       }),
@@ -380,7 +442,7 @@ describe("resolveConnection", () => {
 
   test("empty serverUrl and empty directory throw", () => {
     expect(() =>
-      resolveConnection({ pluginInput: { serverUrl: "", directory: "" }, env: {}, logger }),
+      resolveConnection({ pluginInput: { serverUrl: "", directory: "" }, hostConfig: {}, env: {}, logger }),
     ).toThrow();
   });
 
@@ -388,6 +450,7 @@ describe("resolveConnection", () => {
     expect(
       resolveConnection({
         pluginInput: { serverUrl: "http://a", directory: "/d" },
+        hostConfig: {},
         env: { OPENCODE_SERVER_USERNAME: "u", OPENCODE_SERVER_PASSWORD: "p" },
         logger,
       }),
@@ -414,6 +477,11 @@ export interface SubagentConfig {
   maxPanes: number;
 }
 
+export interface SubagentPluginOptions {
+  enabled?: unknown;
+  maxPanes?: unknown;
+}
+
 export interface ResolvedConnection {
   serverUrl: string;
   directory: string;
@@ -424,6 +492,8 @@ export interface ResolvedConnection {
 interface SubagentDisplayBlock {
   enabled?: unknown;
   maxPanes?: unknown;
+  serverUrl?: unknown;
+  directory?: unknown;
 }
 
 function readBlock(hostConfig: SdkConfig, vendor: "akane" | "sibyl"): SubagentDisplayBlock {
@@ -439,18 +509,50 @@ function readBlock(hostConfig: SdkConfig, vendor: "akane" | "sibyl"): SubagentDi
   return (sibyl?.subagentDisplay ?? {}) as SubagentDisplayBlock;
 }
 
-function parseBool(v: unknown): boolean | undefined {
+type ParsedBool = boolean | "invalid" | undefined;
+
+function parseBool(v: unknown): ParsedBool {
+  if (v === undefined) return undefined;
   if (typeof v === "boolean") return v;
   if (typeof v === "string") {
     const l = v.toLowerCase();
     if (l === "1" || l === "true" || l === "yes") return true;
     if (l === "0" || l === "false" || l === "no") return false;
   }
-  return undefined;
+  return "invalid";
+}
+
+function resolveBool(candidates: readonly unknown[], logger: SubagentLogger): boolean {
+  for (const raw of candidates) {
+    const parsed = parseBool(raw);
+    if (parsed === undefined) continue;
+    if (parsed === "invalid") {
+      logger.error("[subagent] invalid enabled configured");
+      throw new Error("subagentDisplay.enabled: expected a boolean");
+    }
+    return parsed;
+  }
+  return false;
+}
+
+function resolveString(
+  candidates: readonly unknown[],
+  field: "serverUrl" | "directory",
+  logger: SubagentLogger,
+): string {
+  for (const raw of candidates) {
+    if (raw === undefined) continue;
+    if (typeof raw !== "string" || raw.length === 0) {
+      logger.error(`[subagent] ${field} is missing or invalid`);
+      throw new Error(`${field} must be a non-empty string`);
+    }
+    return raw;
+  }
+  return "";
 }
 
 export function resolveSubagentConfig(args: {
-  pluginOptions?: Record<string, unknown> | undefined;
+  pluginOptions?: SubagentPluginOptions | undefined;
   hostConfig: SdkConfig;
   env: Record<string, string | undefined>;
   logger: SubagentLogger;
@@ -459,14 +561,19 @@ export function resolveSubagentConfig(args: {
   const akane = readBlock(hostConfig, "akane");
   const sibyl = readBlock(hostConfig, "sibyl");
 
-  // enabled: env > akane > sibyl > default(false)
-  let enabled: boolean | undefined = parseBool(env.SIBYL_SUBAGENT_ENABLED);
-  if (enabled === undefined) enabled = parseBool(akane.enabled);
-  if (enabled === undefined) enabled = parseBool(sibyl.enabled);
-  if (enabled === undefined) enabled = false;
+  // enabled: env > pluginOptions > akane > sibyl > default(false)
+  const enabled = resolveBool(
+    [env.SIBYL_SUBAGENT_ENABLED, args.pluginOptions?.enabled, akane.enabled, sibyl.enabled],
+    logger,
+  );
 
-  // maxPanes: env > akane > sibyl > default(4)
-  const candidates: Array<unknown> = [env.SIBYL_SUBAGENT_MAX_PANES, akane.maxPanes, sibyl.maxPanes];
+  // maxPanes: env > pluginOptions > akane > sibyl > default(4)
+  const candidates: Array<unknown> = [
+    env.SIBYL_SUBAGENT_MAX_PANES,
+    args.pluginOptions?.maxPanes,
+    akane.maxPanes,
+    sibyl.maxPanes,
+  ];
   let resolved: number | undefined;
   for (const raw of candidates) {
     if (raw === undefined) continue;
@@ -486,12 +593,25 @@ export function resolveSubagentConfig(args: {
 
 export function resolveConnection(args: {
   pluginInput: { serverUrl?: string | undefined; directory?: string | undefined };
+  hostConfig: SdkConfig;
   env: Record<string, string | undefined>;
   logger: SubagentLogger;
 }): ResolvedConnection {
-  const serverUrl = args.env.OPENCODE_SERVER_URL ?? args.pluginInput.serverUrl ?? "";
-  const directory = args.env.OPENCODE_PROJECT_DIR ?? args.pluginInput.directory ?? "";
-  if (serverUrl.length === 0 || !validateServerUrl(serverUrl)) {
+  const akane = readBlock(args.hostConfig, "akane");
+  const sibyl = readBlock(args.hostConfig, "sibyl");
+  // Each field resolves independently. Once a defined candidate is selected,
+  // validation failure throws instead of falling through to a lower layer.
+  const serverUrl = resolveString(
+    [args.env.OPENCODE_SERVER_URL, akane.serverUrl, sibyl.serverUrl, args.pluginInput.serverUrl],
+    "serverUrl",
+    args.logger,
+  );
+  const directory = resolveString(
+    [args.env.OPENCODE_PROJECT_DIR, akane.directory, sibyl.directory, args.pluginInput.directory],
+    "directory",
+    args.logger,
+  );
+  if (!validateServerUrl(serverUrl)) {
     args.logger.error("[subagent] serverUrl is missing or invalid");
     throw new Error("serverUrl must be http/https");
   }
@@ -520,7 +640,7 @@ Expected: all green.
 
 ```bash
 git add src/subagent-config.ts tests/subagent-config.test.ts
-git commit -m "feat: ConfigResolver（env > akane > sibyl の項目単位解決）を追加"
+git commit -m "feat: ConfigResolver（env > pluginOptions > akane > sibyl の項目単位解決）を追加"
 ```
 
 ---
@@ -539,14 +659,14 @@ git commit -m "feat: ConfigResolver（env > akane > sibyl の項目単位解決�
 **Interfaces:**
 - Consumes: `PaneBackend` (`./pane-backend.js`), `PtyManager` (`./pty-manager.js`), `PtyOptions`/`PaneModel` (`./types.js`) — all existing.
 - Produces:
-  - `src/subagent-types.ts`: `export interface SubagentLikeSession { id: string; parentID?: string | undefined; time: { created: number } }`; `export interface SubagentSessionClient { list(): Promise<SubagentLikeSession[]> }`; `export interface AttachTarget { sessionId: string; createdAt: number }`; `export interface SubagentPaneManager { open(target: AttachTarget): Promise<void>; close(sessionId: string): Promise<void>; listOpen(): string[]; }`.
+  - `src/subagent-types.ts`: `export interface SubagentLikeSession { id: string; parentID?: string | undefined; time: { created: number } }`; `export interface SubagentSessionClient { list(signal?: AbortSignal): Promise<SubagentLikeSession[]> }`; `export interface AttachTarget { sessionId: string; createdAt: number }`; `export interface SubagentPaneManager { open(target: AttachTarget): Promise<void>; close(sessionId: string): Promise<void>; listOpen(): string[]; }`.
   - `src/subagent-attach-args.ts`: `export function isWindows(): boolean`; `export function resolveOpencodeCommand(): string`; `export function buildAttachPtyOptions(args: { target: AttachTarget; serverUrl: string; directory: string; username?: string | undefined; password?: string | undefined }): PtyOptions`.
-  - `src/subagent-pane-adapter.ts`: `export class SubagentPaneAdapter implements SubagentPaneManager` with `constructor(args: { layout: LayoutManagerController; paneBackend: PaneBackend; ptyManager: PtyManager; serverUrl: string; directory: string; username?: string | undefined; password?: string | undefined; logger: SubagentLogger })`.
+- `src/subagent-pane-adapter.ts`: `export class SubagentPaneAdapter implements SubagentPaneManager` with `constructor(args: { layout: LayoutManagerController; paneBackend: PaneBackend; ptyManager: PtyManager; serverUrl: string; directory: string; username?: string | undefined; password?: string | undefined; logger: SubagentLogger })`.
   - `src/layout-manager.tsx`: `LayoutManagerController` gains `readonly forceFocus: (id: PaneId) => void`.
 
 **Behavior contract:**
 - `buildAttachPtyOptions` returns `command: "opencode.cmd"` on Windows (`process.platform === "win32"`) else `"opencode"`; `args` exactly `["attach", serverUrl, "--session", sessionId, "--dir", directory, "--mini"]` (positional `serverUrl` first, spec FR-1.4); `cwd: directory`; `env` contains **only** `OPENCODE_SERVER_USERNAME`/`OPENCODE_SERVER_PASSWORD` when defined (other vars are merged downstream by `PtyManager.spawn`, which spreads `process.env` — do NOT set credentials elsewhere). `env` values are `string`; use `Record<string, string>` cast via explicit per-key assignment (no `as any`). Never `-u`/`-p`.
-- `SubagentPaneAdapter.open` is idempotent per `sessionId`: repeat call with an open pane is a no-op. It resolves the PTY handle *before* mutating the layout (spawn before split). On failure it logs (sanitized) and does not throw/crash (zero-crash). After successful spawn it calls `layout.splitPane("horizontal", ptyOptions, createPane)` — `createPane` comes from `paneBackend.create` — then calls `layout.forceFocus(newPaneId)` (spec FR-1.3).
+- `SubagentPaneAdapter.open` is idempotent per `sessionId`: repeat call with an open pane is a no-op. It builds options, validates the session and server URL, and resolves the PTY handle inside one `try/catch` so invalid input and spawn failures are logged (sanitized) and do not reject `open()`. After successful spawn it calls `layout.splitPane("horizontal", ptyOptions, createPane)` — `createPane` comes from `paneBackend.create` — then transfers the returned handle through `await layout.onPtyReady(newPaneId, spawnedHandle)` before calling `layout.forceFocus(newPaneId)`. If layout creation does not produce a pane, it terminates the already-spawned handle and does not leave it discarded. The layout callback must be synchronous and must not cause a second spawn (spec FR-1.3).
 - `close(sessionId)` is idempotent: unknown `sessionId` → no-op.
 
 - [ ] **Step 1: Write the failing test for attach-args**
@@ -610,6 +730,16 @@ describe("buildAttachPtyOptions", () => {
       }),
     ).toThrow();
   });
+
+  test("unsupported server URL throws before constructing attach args", () => {
+    expect(() =>
+      buildAttachPtyOptions({
+        target: { sessionId: "ses-123", createdAt: 1 },
+        serverUrl: "ftp://localhost:3000",
+        directory: "/repo",
+      }),
+    ).toThrow();
+  });
 });
 ```
 
@@ -629,18 +759,27 @@ function fakePtyHandle(id: string): PtyHandle {
   return { id, write: () => {}, resize: () => {}, onData: () => () => {}, onExit: () => () => {} };
 }
 
-function makeLayout(spawned: PtyOptions[], forceFocused: string[]): LayoutManagerController {
+function makeLayout(
+  spawned: PtyOptions[],
+  forceFocused: string[],
+  createdIds: string[] = [],
+  readyHandles: string[] = [],
+): LayoutManagerController {
   const noop = () => {};
   return {
     model: (() => ({})) as never,
     focusedId: () => "root-pane",
-    splitPane: (_direction, ptyOptions) => {
+    splitPane: (_direction, ptyOptions, createPane) => {
       spawned.push(ptyOptions);
+      const created = createPane?.(ptyOptions);
+      if (created !== undefined) createdIds.push(created.id);
     },
     closePane: async () => {},
     focusNext: noop,
     focusPrev: noop,
-    onPtyReady: async noop,
+    onPtyReady: async (_paneId, handle) => {
+      readyHandles.push(handle.id);
+    },
     onPtyExit: noop,
     onPtyCleanup: async noop,
     focusPane: noop,
@@ -683,6 +822,7 @@ describe("SubagentPaneAdapter", () => {
   test("open spawns PTY with attach argv and focuses new pane", async () => {
     const spawned: PtyOptions[] = [];
     const forceFocused: string[] = [];
+    const readyHandles: string[] = [];
     const logger: SubagentLogger = { info: () => {}, warn: () => {}, error: () => {} };
     const { backend } = makeBackend();
     const ptyManager = {
@@ -691,7 +831,7 @@ describe("SubagentPaneAdapter", () => {
       terminateAll: async () => {},
     } as unknown as PtyManager;
     const adapter = new SubagentPaneAdapter({
-      layout: makeLayout(spawned, forceFocused),
+      layout: makeLayout(spawned, forceFocused, [], readyHandles),
       paneBackend: backend,
       ptyManager,
       serverUrl: "http://localhost:3000",
@@ -712,6 +852,7 @@ describe("SubagentPaneAdapter", () => {
       "--mini",
     ]);
     expect(forceFocused).toHaveLength(1);
+    expect(readyHandles).toEqual(["pty-1"]);
   });
 
   test("open is idempotent per sessionId", async () => {
@@ -735,6 +876,28 @@ describe("SubagentPaneAdapter", () => {
     await adapter.open({ sessionId: "ses-1", createdAt: 1 });
     await adapter.open({ sessionId: "ses-1", createdAt: 1 });
     expect(spawned).toHaveLength(1);
+  });
+
+  test("open logs invalid session input and resolves without spawning", async () => {
+    const warnings: string[] = [];
+    const logger: SubagentLogger = { info: () => {}, warn: (m) => warnings.push(m), error: () => {} };
+    const { backend } = makeBackend();
+    const ptyManager = {
+      spawn: async () => fakePtyHandle("unused"),
+      terminate: async () => {},
+      terminateAll: async () => {},
+    } as unknown as PtyManager;
+    const adapter = new SubagentPaneAdapter({
+      layout: makeLayout([], []),
+      paneBackend: backend,
+      ptyManager,
+      serverUrl: "http://x",
+      directory: "/d",
+      logger,
+    });
+    await adapter.open({ sessionId: "bad;id", createdAt: 1 });
+    expect(warnings).toHaveLength(1);
+    expect(adapter.listOpen()).toEqual([]);
   });
 
   test("close of unknown sessionId is a no-op", async () => {
@@ -834,7 +997,7 @@ export interface SubagentPaneManager {
 - [ ] **Step 6: Implement `src/subagent-attach-args.ts`**
 
 ```ts
-import { validateSessionId } from "./subagent-validation.js";
+import { validateServerUrl, validateSessionId } from "./subagent-validation.js";
 import type { PtyOptions } from "./types.js";
 import type { AttachTarget } from "./subagent-types.js";
 
@@ -855,6 +1018,9 @@ export function buildAttachPtyOptions(args: {
 }): PtyOptions {
   if (!validateSessionId(args.target.sessionId)) {
     throw new Error("attach: invalid session id");
+  }
+  if (!validateServerUrl(args.serverUrl)) {
+    throw new Error("attach: invalid server URL");
   }
   const env: Record<string, string> = {};
   if (args.username !== undefined) env.OPENCODE_SERVER_USERNAME = args.username;
@@ -880,11 +1046,22 @@ export function buildAttachPtyOptions(args: {
 
 ```ts
 // in LayoutManagerController interface (after focusPane)
+readonly splitPane: (
+  direction: SplitDirection,
+  newPtyOptions: PtyOptions,
+  createPane?: (options: PtyOptions) => PaneModel,
+) => void;
 readonly forceFocus: (id: PaneId) => void;
 
 // in createLayoutManagerController return object (after focusPane: setFocusedId)
 forceFocus: setFocusedId,
 ```
+
+Update the controller implementation so `splitPane` forwards the callback as
+the fifth argument to `splitPaneInTree`. The callback is invoked synchronously
+within the same call stack and its returned `PaneModel` is the pane subsequently
+used by the layout. Update the `makeLayout` test fake to invoke the callback and
+retain the returned pane id independently from the `forceFocus` assertions.
 
 - [ ] **Step 8: Implement `src/subagent-pane-adapter.ts`**
 
@@ -894,19 +1071,19 @@ import type { PaneBackend } from "./pane-backend.js";
 import type { PtyManager } from "./pty-manager.js";
 import { buildAttachPtyOptions } from "./subagent-attach-args.js";
 import type { SubagentLogger } from "./subagent-logger.js";
-import { sanitizeSessionId } from "./subagent-logger.js";
+import { sanitizeSessionId, sanitizeError } from "./subagent-logger.js";
 import type { AttachTarget, SubagentPaneManager } from "./subagent-types.js";
-import { findPane }, type { PaneModel } from "./keymap.js" // (see note below)
+import type { PaneModel } from "./types.js";
 ```
 
-Note: `findPane` is exported from `keymap.js`. Use it to resolve the newly created pane's id — but rather than duplicating tree-search logic here, capture the pane via the `createPane` callback supplied to `layout.splitPane(direction, options, createPane)`. `splitPane` calls `createPane(newPtyOptions)` synchronously inside; store the returned `PaneModel.id`:
+Note: capture the pane via the `createPane` callback supplied to `layout.splitPane(direction, options, createPane)`. `splitPane` calls `createPane(newPtyOptions)` synchronously inside; store the returned `PaneModel.id`:
 
 ```ts
 // src/subagent-pane-adapter.ts (full)
 import type { LayoutManagerController } from "./layout-manager.js";
 import type { PaneBackend } from "./pane-backend.js";
 import type { PtyManager } from "./pty-manager.js";
-import { sanitizeSessionId } from "./subagent-logger.js";
+import { sanitizeError, sanitizeSessionId } from "./subagent-logger.js";
 import type { SubagentLogger } from "./subagent-logger.js";
 import { buildAttachPtyOptions } from "./subagent-attach-args.js";
 import type { AttachTarget, SubagentPaneManager } from "./subagent-types.js";
@@ -932,32 +1109,34 @@ export class SubagentPaneAdapter implements SubagentPaneManager {
     if (this.paneBySession.has(target.sessionId)) return;
     const { layout, paneBackend, ptyManager, serverUrl, directory, username, password, logger } =
       this.deps;
-    const ptyOptions = buildAttachPtyOptions({
-      target,
-      serverUrl,
-      directory,
-      username,
-      password,
-    });
     try {
-      // Resolve the PTY handle BEFORE mutating layout.
-      await paneBackend.spawn(ptyManager, ptyOptions);
+      const ptyOptions = buildAttachPtyOptions({
+        target,
+        serverUrl,
+        directory,
+        username,
+        password,
+      });
+      // Resolve the PTY handle BEFORE mutating layout, then transfer it to
+      // LayoutManager ownership so Pane reuses it instead of spawning twice.
+      const spawnedHandle = await paneBackend.spawn(ptyManager, ptyOptions);
+      let created: PaneModel | undefined;
+      layout.splitPane("horizontal", ptyOptions, (options) => {
+        created = paneBackend.create(options);
+        return created;
+      });
+      if (created === undefined) {
+        await paneBackend.terminate(ptyManager, spawnedHandle.id);
+        return;
+      }
+      await layout.onPtyReady(created.id, spawnedHandle);
+      layout.forceFocus(created.id);
+      this.paneBySession.set(target.sessionId, created.id);
     } catch (error) {
       logger.warn(
-        `[subagent] attach spawn failed for ${sanitizeSessionId(target.sessionId)}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `[subagent] attach failed for ${sanitizeSessionId(target.sessionId)}: ${sanitizeError(error)}`,
       );
       return;
-    }
-    let created: PaneModel | undefined;
-    layout.splitPane("horizontal", ptyOptions, (options) => {
-      created = paneBackend.create(options);
-      return created;
-    });
-    if (created !== undefined) {
-      this.deps.layout.forceFocus(created.id);
-      this.paneBySession.set(target.sessionId, created.id);
     }
   }
 
@@ -974,7 +1153,9 @@ export class SubagentPaneAdapter implements SubagentPaneManager {
 }
 ```
 
-(If the `created` capture in `splitPane` turns out not to run synchronously against the existing `keymap.ts` — confirm by running the adapter test; if it runs later, instead re-scan the layout model via a local `findNewestLeaf` helper and use that id.)
+The implementation must not add a delayed tree scan or a second PTY spawn: the
+third `createPane` callback is synchronous by contract, and the returned pane id
+is the only id used for handle transfer and focus.
 
 - [ ] **Step 9: Run tests to verify they pass**
 
@@ -1005,22 +1186,22 @@ git commit -m "feat: attach argv ビルダーと SubagentPaneAdapter（冪等 op
 - Consumes: `SubagentLikeSession` (Task 4/types), `SubagentLogger` (Task 2); SDK types from `@opencode-ai/sdk`: `import type { Event } from "@opencode-ai/sdk"` (or `@opencode-ai/sdk/v2` — whichever the host resolves; pin to the same import root used elsewhere in the codebase).
 - Produces:
   - `export type SubagentEvent = | { type: "subagent.created"; session: SubagentLikeSession } | { type: "subagent.idle"; sessionId: string } | { type: "subagent.error"; sessionId?: string | undefined } | { type: "subagent.deleted"; sessionId: string }`.
-  - `export interface SubagentEventSource { start(): void; stop(): Promise<void>; onEvent(handler: (event: SubagentEvent) => void): void; onReconnectRequired(handler: () => void): void; }`.
+  - `export interface SubagentEventSource { start(): void; stop(): Promise<void>; onEvent(handler: (event: SubagentEvent) => void): void; onReconnectRequired(handler: () => Promise<void> | void): void; }`.
   - `export class TuiEventBusSource implements SubagentEventSource` — constructor `({ eventBus, logger }: { eventBus: TuiEventBusLike; logger: SubagentLogger })`; `TuiEventBusLike` is a structural subset `{ on(type, handler): () => void; off?(type, handler): void }`.
   - `export function buildSseHeaders(auth: { username?: string | undefined; password?: string | undefined }): Record<string, string>`.
-  - `export class SseEventSource implements SubagentEventSource` — constructor `({ subscribe, listSessions, auth, logger, sleep, retryConfig }: SseDeps)`.
+  - `export class SseEventSource implements SubagentEventSource` — constructor `({ subscribe, listSessions, auth, logger, sleep, lifecycleSignal }: SseDeps)`.
 
 **Behavior contract:**
 - `TuiEventBusSource.start()` subscribes to four SDK event types: `"session.created"`, `"session.idle"`, `"session.error"`, `"session.deleted"`; filters `session.created`/`session.deleted` events to `properties.info.parentID != null` before emitting; maps `session.idle` → `subagent.idle` (with `sessionID`), `session.error` → `subagent.error` (with optional `sessionID` — never throws when absent, spec FR-3.2).
 - `buildSseHeaders` returns `{}` when no password; `{ Authorization: "Basic <base64(u:p)>" }` otherwise (`Buffer.from(`${u ?? ""}:${p}`).toString("base64")`); result never contains the raw password.
-- `SseEventSource.start()` opens a background loop calling `deps.subscribe()` (an injectable wrapper around `client.event.subscribe()`); iterates `stream` with `for await`; on stream end or error: log (sanitized `sessionId`s only), call `onReconnectRequired()` handler, wait `sleep(delay)` with exponential backoff (`500 * 2^min(attempt, 6)` ms), then resubscribe; `stop()` aborts the loop and resolves. `maxAttempts` is unlimited (continuous operation); each event is converted via the same mapping as `TuiEventBusSource`; after each reconnect, also call `listSessions()` and emit `subagent.created` for each `parentID != null` session returned (this realises spec FR-4.2's in-band resync trigger — the lifecycle manager additionally pulls at start/reconnect for authority).
+- `SseEventSource.start()` opens a background loop calling `deps.subscribe(signal)` (an injectable wrapper around `client.event.subscribe({ signal })`); iterates `stream` with `for await`; on stream end or error: dispatch every `onReconnectRequired` handler and await its resync promise before calculating or awaiting the exponential backoff sleep. `stop()` sets `stopped`, aborts an `AbortController` connected to the lifecycle signal, and awaits the loop. The retry sleep also receives the same signal. `AbortError` caused by shutdown is normal completion and is not logged. `maxAttempts` is unlimited (continuous operation); each event is converted via the same mapping as `TuiEventBusSource`; after each reconnect, also call `listSessions(signal)` and emit `subagent.created` for each `parentID != null` session returned (this realises spec FR-4.2's in-band resync trigger — the lifecycle manager additionally pulls at start/reconnect for authority).
 
 - [ ] **Step 1: Write the failing test**
 
 ```ts
 // tests/subagent-event-source.test.ts
 import { describe, expect, test } from "bun:test";
-import { TuiEventBusSource, buildSseHeaders } from "../src/subagent-event-source";
+import { SseEventSource, TuiEventBusSource, buildSseHeaders } from "../src/subagent-event-source";
 import type { SubagentLogger } from "../src/subagent-logger";
 
 const logger: SubagentLogger = { info: () => {}, warn: () => {}, error: () => {} };
@@ -1126,6 +1307,58 @@ describe("buildSseHeaders", () => {
     expect(JSON.stringify(headers)).not.toContain("p@ss");
   });
 });
+
+describe("SseEventSource lifecycle", () => {
+  test("dispatches reconnect/resync before retry delay", async () => {
+    const order: string[] = [];
+    const source = new SseEventSource({
+      subscribe: async () => ({ stream: (async function* () {})() }),
+      listSessions: async () => {
+        order.push("resync");
+        return [];
+      },
+      auth: {},
+      logger,
+      sleep: async (_ms, signal) => {
+        order.push("delay");
+        await new Promise<void>((_resolve, reject) =>
+          signal.addEventListener(
+            "abort",
+            () => reject(Object.assign(new Error("stop"), { name: "AbortError" })),
+            { once: true },
+          ),
+        );
+      },
+    });
+    source.onReconnectRequired(async () => {
+      order.push("notify");
+    });
+    source.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await source.stop();
+    expect(order.slice(0, 3)).toEqual(["notify", "resync", "delay"]);
+  });
+
+  test("stop aborts an in-flight subscribe and treats AbortError as normal", async () => {
+    let aborted = false;
+    const source = new SseEventSource({
+      subscribe: (signal) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener("abort", () => {
+            aborted = true;
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        }),
+      listSessions: async () => [],
+      auth: {},
+      logger,
+      sleep: async () => {},
+    });
+    source.start();
+    await source.stop();
+    expect(aborted).toBe(true);
+  });
+});
 ```
 
 (An `SseEventSource` behavior test for reconnect/resync happens in Task 6 with the lifecycle manager; here we only pin the header builder + `TuiEventBusSource` filtering/mapping.)
@@ -1140,7 +1373,7 @@ Expected: FAIL — module not found.
 ```ts
 import type { SubagentLikeSession } from "./subagent-types.js";
 import type { SubagentLogger } from "./subagent-logger.js";
-import { sanitizeSessionId } from "./subagent-logger.js";
+import { sanitizeError, sanitizeSessionId } from "./subagent-logger.js";
 
 export type SubagentEvent =
   | { type: "subagent.created"; session: SubagentLikeSession }
@@ -1152,7 +1385,7 @@ export interface SubagentEventSource {
   start(): void;
   stop(): Promise<void>;
   onEvent(handler: (event: SubagentEvent) => void): void;
-  onReconnectRequired(handler: () => void): void;
+  onReconnectRequired(handler: () => Promise<void> | void): void;
 }
 
 export interface TuiEventBusLike {
@@ -1209,7 +1442,7 @@ export class TuiEventBusSource implements SubagentEventSource {
     this.handlers.push(handler);
   }
 
-  onReconnectRequired(_handler: () => void): void {
+  onReconnectRequired(_handler: () => Promise<void> | void): void {
     // In-process bus does not disconnect; resync is not driven from here.
   }
 
@@ -1240,11 +1473,16 @@ export function buildSseHeaders(auth: {
 }
 
 export interface SseDeps {
-  subscribe(): Promise<{ stream: AsyncGenerator<unknown, void, unknown> }>;
-  listSessions(): Promise<SubagentLikeSession[]>;
+  subscribe(signal: AbortSignal): Promise<{ stream: AsyncGenerator<unknown, void, unknown> }>;
+  listSessions(signal: AbortSignal): Promise<SubagentLikeSession[]>;
   auth: { username?: string | undefined; password?: string | undefined };
   logger: SubagentLogger;
-  sleep(ms: number): Promise<void>;
+  sleep(ms: number, signal: AbortSignal): Promise<void>;
+  lifecycleSignal?: AbortSignal;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
 }
 
 export class SseEventSource implements SubagentEventSource {
@@ -1252,16 +1490,29 @@ export class SseEventSource implements SubagentEventSource {
   private reconnectHandlers: Array<() => void> = [];
   private stopped = false;
   private loopPromise: Promise<void> | undefined;
+  private abortController: AbortController | undefined;
 
   constructor(private readonly deps: SseDeps) {}
 
   start(): void {
     this.stopped = false;
+    const controller = new AbortController();
+    this.abortController = controller;
+    const lifecycleSignal = this.deps.lifecycleSignal;
+    if (lifecycleSignal?.aborted) controller.abort();
+    else {
+      lifecycleSignal?.addEventListener(
+        "abort",
+        () => this.abortController?.abort(),
+        { once: true },
+      );
+    }
     this.loopPromise = this.runLoop();
   }
 
   async stop(): Promise<void> {
     this.stopped = true;
+    this.abortController?.abort();
     await this.loopPromise;
   }
 
@@ -1269,43 +1520,52 @@ export class SseEventSource implements SubagentEventSource {
     this.handlers.push(handler);
   }
 
-  onReconnectRequired(handler: () => void): void {
+  onReconnectRequired(handler: () => Promise<void> | void): void {
     this.reconnectHandlers.push(handler);
   }
 
   private async runLoop(): Promise<void> {
     let attempt = 0;
+    const signal = this.abortController?.signal ?? new AbortController().signal;
     while (!this.stopped) {
       try {
-        const { stream } = await this.deps.subscribe();
+        const { stream } = await this.deps.subscribe(signal);
         attempt = 0;
         for await (const raw of stream) {
           if (this.stopped) return;
           this.emitMapped(raw);
         }
       } catch (error) {
+        if (this.stopped && isAbortError(error)) return;
         if (this.stopped) return;
         this.deps.logger.warn(
-          `[subagent] SSE stream error: ${error instanceof Error ? error.message : String(error)}`,
+          `[subagent] SSE stream error: ${sanitizeError(error)}`,
         );
       }
       if (this.stopped) return;
-      const delay = 500 * 2 ** Math.min(attempt, 6);
-      await this.deps.sleep(delay);
-      attempt += 1;
-      for (const h of this.reconnectHandlers) h();
+      for (const h of this.reconnectHandlers) await h();
+      if (this.stopped) return;
       try {
-        const sessions = await this.deps.listSessions();
+        const sessions = await this.deps.listSessions(signal);
         for (const s of sessions) {
           if (s.parentID != null) this.emit({ type: "subagent.created", session: s });
         }
       } catch (error) {
+        if (this.stopped && isAbortError(error)) return;
+        if (this.stopped) return;
         this.deps.logger.warn(
-          `[subagent] resync listSessions failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `[subagent] resync listSessions failed: ${sanitizeError(error)}`,
         );
       }
+      if (this.stopped) return;
+      const delay = 500 * 2 ** Math.min(attempt, 6);
+      try {
+        await this.deps.sleep(delay, signal);
+      } catch (error) {
+        if (this.stopped && isAbortError(error)) return;
+        throw error;
+      }
+      attempt += 1;
     }
   }
 
@@ -1393,14 +1653,15 @@ git commit -m "feat: TuiEventBusSource / SseEventSource（再試行・再同期�
   ```.
 
 **Behavior contract (spec FR-1…FR-4, FR-2.1/2.2):**
-- If `config.enabled === false` or `config.maxPanes === 0` → `start()` is a no-op; `stop()` is safe before `start()`.
-- `start()`: subscribes to events (queue), calls `resyncNow()`, then begins draining. The queue guarantees per-session ordering and serializes open/close (no races between `session.list()` pull and live events).
+- If `config.enabled === false` and `config.maxPanes !== 0` → `start()` is a no-op; if `config.maxPanes === 0`, `start()` closes all open panes even when disabled. `stop()` is safe before `start()`.
+- `start()`: marks event intake active, subscribes to events (queue), calls `resyncNow()`, and awaits the queue drain before returning. The queue guarantees per-session ordering and serializes open/close (no races between `session.list()` pull and live events).
 - On `subagent.created`: skip if not `validateSessionId(session.id)`; skip duplicates; if `paneManager.listOpen().length >= config.maxPanes` → evict first: pick the open session with the smallest `AttachTarget.createdAt`, call `paneManager.close(oldestId)` before opening the new one. Then `paneManager.open({ sessionId, createdAt })` and record in `openTargets`.
 - On `subagent.idle`/`subagent.error(id)`/`subagent.deleted`: close the pane and drop the tracking record. Close-once per session: a second event for an already-removed session is a no-op.
 - On `subagent.error` with undefined sessionId: log only (already handled upstream).
 - `resyncNow()`: calls `sessionClient.list()`; for every server session with `parentID != null` that is not currently tracked → emit `subagent.created` into the queue. For every tracked session not present in the server list → emit `subagent.deleted`. (Idempotent: repeat calls converge.)
-- `stop()`: unsubscribes from the event source; for each tracked session → `paneManager.close(id)` (spec FR-4.4); waits for `eventSource.stop()`; clears the queue.
-- Reconnect hook: registers `eventSource.onReconnectRequired(() => void this.resyncNow())` at construction.
+- `stop()`: first disables event intake, awaits the active drain, then attempts every id returned by `paneManager.listOpen()` independently (one rejection must not prevent later closes), clears `openTargets` after all attempts, and finally awaits `eventSource.stop()`. The queue is discarded only after drain completion.
+- If `config.maxPanes === 0`, `start()` closes every currently open pane regardless of `config.enabled`; if `config.enabled === false` with a nonzero limit, it returns without starting the event source. `resyncNow()` and `start()` both await the drain barrier before resolving.
+- Reconnect hook: registers `eventSource.onReconnectRequired(() => this.resyncNow())` at construction so SSE can await notification-driven resync before backoff.
 - Zero-crash: no `await` on a user-visible path throws; internal errors are caught and logged (sanitized).
 
 - [ ] **Step 1: Write the failing test**
@@ -1562,7 +1823,7 @@ describe("SubagentLifecycleManager", () => {
     await m.stop();
   });
 
-  test("maxPanes=0 closes all existing panes and never opens (spec FR-2.1 disabled path)", async () => {
+  test("maxPanes=0 closes all existing panes even when enabled=false", async () => {
     const { source, emit } = makeSource();
     const { pane, opened, closed } = makePane();
     // pre-populate one "existing" pane via the pane manager itself
@@ -1571,7 +1832,7 @@ describe("SubagentLifecycleManager", () => {
       paneManager: pane,
       eventSource: source,
       sessionClient: makeClient([{ id: "pre-1", parentID: "p", time: { created: 0 } }]),
-      config: { enabled: true, maxPanes: 0 },
+      config: { enabled: false, maxPanes: 0 },
       logger,
     });
     await m.start();
@@ -1583,26 +1844,48 @@ describe("SubagentLifecycleManager", () => {
     await m.stop();
   });
 
-  test("resync: creates unknown child sessions and closes vanished ones", async () => {
+  test("stop attempts every open pane when one close rejects", async () => {
     const { source } = makeSource();
-    const { pane, opened, closed } = makePane();
+    const attempted: string[] = [];
+    const pane: SubagentPaneManager = {
+      open: async () => {},
+      listOpen: () => ["first", "second"],
+      close: async (id) => {
+        attempted.push(id);
+        if (id === "first") throw new Error("first close failed");
+      },
+    };
     const m = new SubagentLifecycleManager({
       paneManager: pane,
       eventSource: source,
-      sessionClient: makeClient([
-        { id: "child-1", parentID: "root", time: { created: 5 } },
-        { id: "root", parentID: undefined, time: { created: 1 } },
-      ]),
+      sessionClient: makeClient([]),
       config: { enabled: true, maxPanes: 4 },
       logger,
     });
     await m.start();
-    // At this point resync opened child-1. Now simulate a second resync with empty list:
-    (m as unknown as { deps: { sessionClient: SubagentSessionClient } }).deps.sessionClient =
-      makeClient([]);
-    await m.resyncNow();
-    await flush();
+    await m.stop();
+    expect(attempted).toEqual(["first", "second"]);
+  });
+
+  test("resync: creates unknown child sessions and closes vanished ones", async () => {
+    const { source } = makeSource();
+    const { pane, opened, closed } = makePane();
+    const client = { current: makeClient([
+      { id: "child-1", parentID: "root", time: { created: 5 } },
+      { id: "root", parentID: undefined, time: { created: 1 } },
+    ]) };
+    const m = new SubagentLifecycleManager({
+      paneManager: pane,
+      eventSource: source,
+      sessionClient: { list: (signal) => client.current.list(signal) },
+      config: { enabled: true, maxPanes: 4 },
+      logger,
+    });
+    await m.start();
     expect(opened.map((o) => o.sessionId)).toContain("child-1");
+    // Simulate a second resync with an empty list; resyncNow must await its drain.
+    client.current = makeClient([]);
+    await m.resyncNow();
     expect(closed).toContain("child-1");
     await m.stop();
   });
@@ -1674,7 +1957,6 @@ describe("SubagentLifecycleManager", () => {
 });
 ```
 
-(Replace the `(m as unknown as …)` resync hack with a `config` injection seam if preferred: construct the manager with a `sessionClient` field you can reassign via a test setter — but keep the interface given in the "Produces" block unchanged.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1688,7 +1970,7 @@ Serial queue design: a simple `Promise<void>` chain (`this.tail`) into which eve
 ```ts
 import type { SubagentEvent, SubagentEventSource } from "./subagent-event-source.js";
 import type { SubagentLogger } from "./subagent-logger.js";
-import { sanitizeSessionId } from "./subagent-logger.js";
+import { sanitizeError, sanitizeSessionId } from "./subagent-logger.js";
 import type {
   AttachTarget,
   SubagentLikeSession,
@@ -1701,7 +1983,7 @@ import type { SubagentConfig } from "./subagent-config.js";
 export class SubagentLifecycleManager {
   private readonly openTargets = new Map<string, AttachTarget>();
   private queue: Array<() => Promise<void>> = [];
-  private draining = false;
+  private drainPromise: Promise<void> | undefined;
   private started = false;
 
   constructor(
@@ -1715,7 +1997,7 @@ export class SubagentLifecycleManager {
   ) {
     this.deps.eventSource.onEvent((event) => this.enqueueEvent(event));
     this.deps.eventSource.onReconnectRequired(() => {
-      void this.resyncNow();
+      return this.resyncNow();
     });
   }
 
@@ -1723,12 +2005,17 @@ export class SubagentLifecycleManager {
     if (this.started) return;
     this.started = true;
     const { config, eventSource, paneManager } = this.deps;
-    if (!config.enabled || config.maxPanes === 0) {
-      if (config.maxPanes === 0 && config.enabled) {
-        for (const id of paneManager.listOpen()) {
+    if (config.maxPanes === 0) {
+      for (const id of paneManager.listOpen()) {
+        try {
           await paneManager.close(id);
+        } catch (error) {
+          this.deps.logger.warn(`[subagent] maxPanes cleanup failed: ${sanitizeError(error)}`);
         }
       }
+      return;
+    }
+    if (!config.enabled) {
       return;
     }
     eventSource.start();
@@ -1738,16 +2025,20 @@ export class SubagentLifecycleManager {
   async stop(): Promise<void> {
     if (!this.started) return;
     this.started = false;
-    this.queue = [];
     const { eventSource, paneManager, logger } = this.deps;
-    try {
-      for (const id of paneManager.listOpen()) {
+    await this.drain();
+    const closeResults = await Promise.allSettled(
+      paneManager.listOpen().map(async (id) => {
         await paneManager.close(id);
+      }),
+    );
+    for (const result of closeResults) {
+      if (result.status === "rejected") {
+        logger.warn(`[subagent] error during stop cleanup: ${sanitizeError(result.reason)}`);
       }
-      this.openTargets.clear();
-    } catch (error) {
-      logger.warn(`[subagent] error during stop cleanup: ${String(error)}`);
     }
+    this.openTargets.clear();
+    this.queue = [];
     await eventSource.stop();
   }
 
@@ -1758,7 +2049,7 @@ export class SubagentLifecycleManager {
       const all = await sessionClient.list();
       serverChildren = all.filter((s) => s.parentID != null);
     } catch (error) {
-      logger.warn(`[subagent] resync list failed: ${String(error)}`);
+      logger.warn(`[subagent] resync list failed: ${sanitizeError(error)}`);
       return;
     }
     const serverIds = new Set(serverChildren.map((s) => s.id));
@@ -1772,6 +2063,7 @@ export class SubagentLifecycleManager {
         this.enqueueEvent({ type: "subagent.deleted", sessionId: tracked });
       }
     }
+    await this.drain();
   }
 
   openTargetsForDebug(): ReadonlyMap<string, AttachTarget> {
@@ -1784,18 +2076,18 @@ export class SubagentLifecycleManager {
     void this.drain();
   }
 
-  private async drain(): Promise<void> {
-    if (this.draining) return;
-    this.draining = true;
-    try {
+  private drain(): Promise<void> {
+    if (this.drainPromise !== undefined) return this.drainPromise;
+    this.drainPromise = (async () => {
       for (;;) {
         const job = this.queue.shift();
         if (job === undefined) return;
         await job();
       }
-    } finally {
-      this.draining = false;
-    }
+    })().finally(() => {
+      this.drainPromise = undefined;
+    });
+    return this.drainPromise;
   }
 
   private async handleEvent(event: SubagentEvent): Promise<void> {
@@ -1815,7 +2107,7 @@ export class SubagentLifecycleManager {
           return;
       }
     } catch (error) {
-      this.deps.logger.warn(`[subagent] event handler error: ${String(error)}`);
+      this.deps.logger.warn(`[subagent] event handler error: ${sanitizeError(error)}`);
     }
   }
 
@@ -1884,9 +2176,9 @@ git commit -m "feat: SubagentLifecycleManager（状態機械・evict・再同期
 - Test: `tests/subagent-integration.test.ts`
 
 **Interfaces:**
-- Consumes: everything from Tasks 3-6; `TuiPluginApi` (type from `@opencode-ai/plugin/tui`); `LayoutManagerController` (existing); `PtyManager` (existing); `OpenTuiPaneBackend` (existing).
+- Consumes: everything from Tasks 3-6; `TuiPluginApi` (type from `@opencode-ai/plugin/tui`); `LayoutManagerController` (existing); `PtyManager` (existing); `PaneBackend` (existing).
 - Produces:
-  - `export interface SubagentIntegrationOptions { enabled?: boolean; maxPanes?: number }` (pluginOptions overrides; `undefined` fields defer to hostConfig/env).
+  - `export interface SubagentIntegrationOptions { enabled?: boolean; maxPanes?: number }` (pluginOptions are the second layer: env > pluginOptions > akane > sibyl; `undefined` fields defer to lower layers).
   - `export interface SubagentIntegrationHandle { enabled: boolean; stop(): Promise<void>; resyncNow(): Promise<void>; manager?: SubagentLifecycleManager }`.
   - `export function createDefaultAttachTarget(session: SubagentLikeSession): AttachTarget`.
   - `export function createOpenTuiSubagentPaneManager(args: { layout: LayoutManagerController; ptyManager: PtyManager; paneBackend: PaneBackend; serverUrl: string; directory: string; username?: string | undefined; password?: string | undefined; logger: SubagentLogger }): SubagentPaneManager` (thin wrapper over `SubagentPaneAdapter`).
@@ -1894,11 +2186,11 @@ git commit -m "feat: SubagentLifecycleManager（状態機械・evict・再同期
 
 **Behavior contract:**
 - Env defaults to `process.env`; logger defaults to `consoleSubagentLogger`.
-- Merges `options.enabled`/`options.maxPanes` into an effective env override before calling `resolveSubagentConfig` so that explicit pluginOptions still respect env > akane > sibyl via the standard layer order (pluginOptions sit between "env" and "akane" in precedence only when provided as *strings* matching env-naming; see implementation below — simplest correct route: if `options.enabled !== undefined`, synthesize `env.SIBYL_SUBAGENT_ENABLED = String(options.enabled)`; likewise for maxPanes, **but only when the real env var is unset**).
-- Reads `hostConfig` from `api.state.config`. Reads `pluginInput` fields as `{ serverUrl: undefined, directory: api.state.path.directory }` (TUI-side `serverUrl` is not exposed on `TuiPluginApi`; rely on `OPENCODE_SERVER_URL` env or absence). If resolution returns `enabled=false`, return `{ enabled, stop: async () => {}, resyncNow: async () => {} }` immediately (zero setup).
-- Event-source selection: default `TuiEventBusSource({ eventBus: api.event })`. Only use `SseEventSource` when an env flag is explicitly set (e.g., `SIBYL_SUBAGENT_SSE=1`); construct it as `new SseEventSource({ subscribe: () => api.client.event.subscribe(), listSessions: () => api.client.session.list().then((r) => (Array.isArray((r as { data?: unknown }).data) ? ((r as { data: SubagentLikeSession[] }).data) : []), auth, logger, sleep: (ms) => new Promise((r) => setTimeout(r, ms)) })`.
-- Registers `api.lifecycle.onDispose(() => manager.stop())` so FR-4.4 is guaranteed on TUI shutdown.
-- Registers `sibyl.toggleSubagentDisplay` command with `api.keymap.registerLayer`; the command's `run` is a no-op when `enabled === false` (config still off), otherwise logs an info message via `logger.info("[subagent] toggle is config-driven at startup")` (kept minimal; toggling persistence is out of scope).
+- Passes `options` directly as `pluginOptions` to `resolveSubagentConfig`; never rewrites plugin options into env because that would make their precedence indistinguishable from env and would hide the selected layer in tests.
+- Reads `hostConfig` from `api.state.config`. Reads `pluginInput` fields as `{ serverUrl: undefined, directory: api.state.path.directory }`; connection resolution also reads the akane/sibyl connection fields independently. Register `sibyl.toggleSubagentDisplay` before any disabled early return. When `config.enabled === false` and `config.maxPanes !== 0`, return `{ enabled: false, stop: async () => {}, resyncNow: async () => {} }` after registration; when `config.maxPanes === 0`, still construct the lifecycle manager and run its start cleanup so existing panes are closed regardless of `enabled`.
+- Event-source selection: default `TuiEventBusSource({ eventBus: api.event })`. Only use `SseEventSource` when an env flag is explicitly set (e.g., `SIBYL_SUBAGENT_SSE=1`); construct it with `subscribe(signal) => api.client.event.subscribe({ signal })`, `listSessions(signal)`, an abort-aware sleep, `lifecycleSignal: api.lifecycle.signal`, auth, and logger. The SSE source must dispatch and await reconnect handlers before calculating or awaiting retry delay.
+- Registers `api.lifecycle.onDispose(() => manager.stop())` so FR-4.4 is guaranteed on TUI shutdown. Lifecycle cleanup disables event intake, awaits queue drain, attempts all pane closes independently, clears tracking, then stops the event source.
+- Registers `sibyl.toggleSubagentDisplay` command before the disabled return; the command's `run` is a no-op when `enabled === false`, otherwise logs an info message via `logger.info("[subagent] toggle is config-driven at startup")` (kept minimal; toggling persistence is out of scope).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1934,8 +2226,8 @@ const backend = {} as PaneBackend;
 const ptyManager = {} as PtyManager;
 
 describe("attachSubagentIntegration", () => {
-  test("enabled=false (default) → disabled handle, no dispose handler for manager", async () => {
-    const { api } = makeApi({});
+  test("enabled=false (default) → disabled handle and registered no-op toggle", async () => {
+    const { api, layers } = makeApi({});
     const handle = await attachSubagentIntegration(api, {}, {
       layout,
       paneBackend: backend,
@@ -1943,6 +2235,11 @@ describe("attachSubagentIntegration", () => {
       env: {},
     });
     expect(handle.enabled).toBe(false);
+    const toggle = (layers[0] as { commands: Array<{ name: string; run: () => unknown }> }).commands.find(
+      (command) => command.name === "sibyl.toggleSubagentDisplay",
+    );
+    expect(toggle).toBeDefined();
+    await toggle?.run();
     await handle.stop();
   });
 
@@ -1958,7 +2255,7 @@ describe("attachSubagentIntegration", () => {
     await handle.stop();
   });
 
-  test("options.enabled=true is converted to an env override only when real env is unset", async () => {
+  test("options.enabled=true overrides akane/sibyl but not an explicit env value", async () => {
     const { api } = makeApi({});
     const handle = await attachSubagentIntegration(api, { enabled: true }, {
       layout,
@@ -1967,6 +2264,22 @@ describe("attachSubagentIntegration", () => {
       env: { OPENCODE_SERVER_URL: "http://x", OPENCODE_PROJECT_DIR: "/d" },
     });
     expect(handle.enabled).toBe(true);
+    await handle.stop();
+  });
+
+  test("explicit env value beats pluginOptions", async () => {
+    const { api } = makeApi({});
+    const handle = await attachSubagentIntegration(api, { enabled: true }, {
+      layout,
+      paneBackend: backend,
+      ptyManager,
+      env: {
+        SIBYL_SUBAGENT_ENABLED: "false",
+        OPENCODE_SERVER_URL: "http://x",
+        OPENCODE_PROJECT_DIR: "/d",
+      },
+    });
+    expect(handle.enabled).toBe(false);
     await handle.stop();
   });
 
@@ -2002,14 +2315,13 @@ Per contract above. Pseudocode body:
 import type { TuiPluginApi } from "@opencode-ai/plugin/tui";
 import type { Config as SdkConfig } from "@opencode-ai/sdk";
 import type { LayoutManagerController } from "./layout-manager.js";
-import type { OpenTuiPaneBackend } from "./opentui-pane-backend.js";
 import type { PaneBackend } from "./pane-backend.js";
 import type { PtyManager } from "./pty-manager.js";
 import { resolveConnection, resolveSubagentConfig } from "./subagent-config.js";
 import { SubagentPaneAdapter } from "./subagent-pane-adapter.js";
 import { SubagentLifecycleManager } from "./subagent-lifecycle-manager.js";
-import { TuiEventBusSource, SseEventSource, buildSseHeaders } from "./subagent-event-source.js";
-import { consoleSubagentLogger, sanitizeSessionId } from "./subagent-logger.js";
+import { TuiEventBusSource, SseEventSource } from "./subagent-event-source.js";
+import { consoleSubagentLogger } from "./subagent-logger.js";
 import type { SubagentLogger } from "./subagent-logger.js";
 import type {
   AttachTarget,
@@ -2060,18 +2372,26 @@ export async function attachSubagentIntegration(
 ): Promise<SubagentIntegrationHandle> {
   const logger = deps.logger ?? consoleSubagentLogger;
   const rawEnv = deps.env ?? process.env;
-  // Synthesize env overrides from pluginOptions only when real env vars are unset.
   const env: Record<string, string | undefined> = { ...rawEnv };
-  if (options.enabled !== undefined && env.SIBYL_SUBAGENT_ENABLED === undefined) {
-    env.SIBYL_SUBAGENT_ENABLED = options.enabled ? "true" : "false";
-  }
-  if (options.maxPanes !== undefined && env.SIBYL_SUBAGENT_MAX_PANES === undefined) {
-    env.SIBYL_SUBAGENT_MAX_PANES = String(options.maxPanes);
-  }
 
   const hostConfig = api.state.config as SdkConfig;
-  const config = resolveSubagentConfig({ hostConfig, env, logger });
-  if (!config.enabled || config.maxPanes === 0) {
+  const config = resolveSubagentConfig({ pluginOptions: options, hostConfig, env, logger });
+  api.keymap.registerLayer({
+    commands: [
+      {
+        name: "sibyl.toggleSubagentDisplay",
+        title: "Toggle Subagent Display",
+        desc: "Subagent display is configured at startup; edit config to toggle.",
+        category: "Plugin",
+        run: () => {
+          if (!config.enabled || config.maxPanes === 0) return;
+          logger.info("[subagent] toggle is config-driven at startup");
+        },
+      },
+    ],
+    bindings: [],
+  });
+  if (!config.enabled && config.maxPanes !== 0) {
     return {
       enabled: false,
       stop: async () => {},
@@ -2081,6 +2401,7 @@ export async function attachSubagentIntegration(
 
   const connection = resolveConnection({
     pluginInput: { serverUrl: undefined, directory: api.state.path.directory },
+    hostConfig,
     env,
     logger,
   });
@@ -2098,7 +2419,7 @@ export async function attachSubagentIntegration(
 
   const useSse = env.SIBYL_SUBAGENT_SSE === "1" || env.SIBYL_SUBAGENT_SSE === "true";
   const sessionClient: SubagentSessionClient = {
-    list: async () => {
+    list: async (_signal) => {
       const result = await api.client.session.list();
       const data = (result as { data?: unknown }).data;
       return Array.isArray(data) ? (data as SubagentLikeSession[]) : [];
@@ -2107,11 +2428,21 @@ export async function attachSubagentIntegration(
 
   const eventSource = useSse
     ? new SseEventSource({
-        subscribe: () => api.client.event.subscribe(),
-        listSessions: () => sessionClient.list(),
+        subscribe: (signal) => api.client.event.subscribe({ signal }),
+        listSessions: (signal) => sessionClient.list(signal),
         auth: { username: connection.username, password: connection.password },
         logger,
-        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        lifecycleSignal: api.lifecycle.signal,
+        sleep: (ms, signal) =>
+          new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(resolve, ms);
+            const abort = () => {
+              clearTimeout(timer);
+              reject(new DOMException("Aborted", "AbortError"));
+            };
+            if (signal.aborted) abort();
+            else signal.addEventListener("abort", abort, { once: true });
+          }),
       })
     : new TuiEventBusSource({ eventBus: api.event, logger });
 
@@ -2125,32 +2456,18 @@ export async function attachSubagentIntegration(
   await manager.start();
 
   api.lifecycle.onDispose(() => manager.stop());
-  api.keymap.registerLayer({
-    commands: [
-      {
-        name: "sibyl.toggleSubagentDisplay",
-        title: "Toggle Subagent Display",
-        desc: "Subagent display is configured at startup; edit config to toggle.",
-        category: "Plugin",
-        run: () => logger.info("[subagent] toggle is config-driven at startup"),
-      },
-    ],
-    bindings: [],
-  });
 
   return {
-    enabled: true,
+    enabled: config.enabled && config.maxPanes > 0,
     stop: () => manager.stop(),
     resyncNow: () => manager.resyncNow(),
     manager,
   };
 }
 
-// Silence unused-import warnings for helpers kept for API surface parity.
-void sanitizeSessionId;
-void buildSseHeaders;
-void OpenTuiPaneBackend;
 ```
+
+- The installed `TuiPluginApi` type must expose `api.lifecycle.signal` for this path. If the SDK declaration omits it, define a local structural lifecycle type with `onDispose` and `signal: AbortSignal`, narrow the incoming API at this boundary, and keep the signal wiring in the integration factory; do not remove the signal or replace it with an unrelated timeout.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -2243,7 +2560,8 @@ Inside the existing `config.command` block, add:
 
 - [ ] **Step 4: Modify `src/tui.tsx` to accept the integration factory and call it**
 
-Change the signature and add a wire-up call at the end of the plugin setup (after `api.lifecycle.onDispose(() => ptyManager.terminateAll())`):
+Change the signature and add a wire-up call before the global PTY cleanup hook so
+subagent pane cleanup completes while the pane-owned handles are still available:
 
 ```ts
 type SubagentIntegration = (
@@ -2262,7 +2580,7 @@ export function createTuiPlugin(
   subagentIntegrationFactory?: SubagentIntegration,
 ): TuiPlugin {
   return async (api, options) => {
-    // ... existing route/keymap/lifecycle setup unchanged ...
+    // ... existing route/keymap setup unchanged ...
     const factory = subagentIntegrationFactory ?? (await import("./subagent-integration.js")).attachSubagentIntegration;
     await factory(api, options as { enabled?: boolean; maxPanes?: number } | undefined ?? {}, {
       layout,
@@ -2311,20 +2629,28 @@ git commit -m "feat: TUI/サーバーにサブエージェント表示統合を�
 
 ## Self-Review (author-ran, 2026-08-09)
 
-**Spec coverage map:**
-- FR-1.1/1.3/1.4 (auto display, horizontal split, positional-first argv, validation, env-only credentials, no shell) → Tasks 1, 4. argv equality asserted in `buildAttachPtyOptions` and adapter test.
-- FR-1.2 (feature toggle, default off) → Tasks 3, 7, 8.
-- FR-2.1 (maxPanes 1–8; 0=disabled; negative/float/NaN → throw without fallback) → Task 3 (`parseMaxPanesValue` + `resolveSubagentConfig` throw path). Boundary test 0 / −1 / 2.5 / NaN / 1 / 8 present.
-- FR-2.2 (evict oldest by `time.created`) → Task 6 (`oldestOpenSessionId` + eviction test).
-- FR-3.1/3.2/3.3 (idle, error-without-id logs only, deleted) → Tasks 5 (mapping), 6 (close-once per session).
-- FR-4.1/4.2/4.3/4.4 (start/reconnect pull, diff & resync, idempotency, dispose cleanup) → Tasks 5 (SseEventSource resync hook), 6 (resyncNow / stop), 7 (onDispose registration).
-- §5 Security (no shell, input validation, credentials never logged) → Tasks 1, 4 (env-only + argv inspection), 2 (`sanitizeSessionId`/`truncate`).
-- §6 Config schema (env > akane > sibyl per-field, applies to `serverUrl`/`directory` too) → Task 3.
-- §8 Test strategy (unit + smoke) → all unit tests above; smoke procedure is manual and listed below under "Manual smoke checks" (not a task — needs a live OpenCode server).
+All 16 requested findings were rechecked against the revised plan:
 
-**Placeholder scan:** No `TBD`/`TODO`/`implement later` in code blocks. One open seam explicitly flagged (Task 4 Step 8's `created` capture via `splitPane`'s `createPane` synchronous invocation) — the plan names the check to run ("confirm by running the adapter test") rather than marking it TODO. This is intentional: the engineer must verify the existing `keymap.ts` semantics before locking the adapter.
+1. **URL credentials:** `validateServerUrl` rejects non-empty username/password while retaining HTTP/HTTPS validation; credentialed URL tests were added in Task 1.
+2. **`open()` error boundary:** option construction and spawn now share the adapter `try/catch`; invalid session and spawn errors are sanitized and do not reject `open()`.
+3. **Direct attach URL validation:** `buildAttachPtyOptions` calls `validateServerUrl`, with an explicit `ftp://` regression test.
+4. **`maxPanes === 0`:** lifecycle `start()` closes panes regardless of `enabled`; the test now uses `enabled: false` and verifies closure.
+5. **Reconnect ordering:** `SseEventSource` awaits reconnect handlers/resync before calculating and awaiting backoff; an ordering test asserts notification → resync → delay.
+6. **Disabled toggle registration:** integration registers `sibyl.toggleSubagentDisplay` before the disabled return; the disabled test finds and runs the no-op command.
+7. **`splitPane` callback contract:** the controller contract includes the third synchronous `createPane` argument, forwards it to the tree helper, and the fake invokes/preserves its returned pane id.
+8. **`pluginOptions` precedence:** the single policy is now env > pluginOptions > akane > sibyl; tests cover plugin override and explicit env precedence.
+9. **PTY ownership:** adapter stores the spawned handle, transfers it through `layout.onPtyReady`, focuses the created pane, and terminates it if layout creation fails; the test asserts handle transfer and one spawn path.
+10. **Invalid boolean values:** `parseBool` distinguishes absent, valid, and invalid values; the first defined invalid value throws instead of falling back, with a `"maybe"` test.
+11. **Connection resolution:** `resolveConnection` receives `hostConfig`, resolves `serverUrl` and `directory` independently through env → akane → sibyl → plugin input, and never falls back after invalid selection; tests cover both precedence and invalid akane URL.
+12. **Drain barriers:** lifecycle `start()`/`resyncNow()` await `drain()`, while `stop()` disables intake, drains, closes panes, clears tracking, and then stops the event source without premature queue discard.
+13. **Error sanitization:** `sanitizeError` strips URL credentials/credential-like fields and guarantees final output ≤200 characters; adapter, SSE, and lifecycle logs use it.
+14. **Independent cleanup:** `stop()` uses independent close attempts over `paneManager.listOpen()`, logs each rejection, clears tracking after all attempts, and has a one-failure/multiple-pane test.
+15. **Unused backend import:** Task 7 consumes `PaneBackend`, removes the `OpenTuiPaneBackend` type import and the value-position sentinel.
+16. **SSE cancellation:** subscribe, list, and retry sleep receive an abort signal; lifecycle signal wiring and AbortError-normal shutdown are specified and tested.
 
-**Type consistency check:** `SubagentEvent` shape is consistent between Task 5 and Task 6 tests. `SubagentPaneManager.open(AttachTarget)` matches across Tasks 4/6/7. `LayoutManagerController.forceFocus` added in Task 4 and consumed in Task 4's adapter. `resolveSubagentConfig` / `resolveConnection` signatures are used identically in Tasks 3 and 7. No name drift found.
+**Plan consistency checks:** The revised signatures match across Tasks 3–8 (`SubagentPluginOptions`, `SubagentSessionClient.list(signal?)`, `SseDeps`, `SubagentEventSource`, and `LayoutManagerController.splitPane`). The former delayed-tree-scan alternative and env-synthesis precedence ambiguity were removed. No unresolved `TBD`, `TODO`, or deferred implementation branch remains in the revised code blocks.
+
+**Spec coverage map:** FR-1.1–1.4 → Tasks 1/4; FR-1.2 toggle → Tasks 3/7/8; FR-2.1/2.2 → Tasks 3/6; FR-3.1–3.3 → Tasks 5/6; FR-4.1–4.4 → Tasks 5/6/7; security logging and credentials → Tasks 1/2/4/5/6; configuration precedence and connection resolution → Task 3; integration wiring → Tasks 7/8. Unit tests and manual smoke checks remain part of the implementation handoff.
 
 ## Manual smoke checks (for the implementer / reviewer, not a CI task)
 
