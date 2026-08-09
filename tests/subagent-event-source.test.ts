@@ -53,6 +53,30 @@ describe("subagent event sources", () => {
     expect(received).toEqual(["subagent.created"]);
   });
 
+  test("maps valid bus events and ignores malformed payloads", async () => {
+    const bus = new EventBus();
+    const logger = new RecordingLogger();
+    const received: string[] = [];
+    const source = new TuiEventBusSource({ eventBus: bus, logger });
+    source.onEvent((event) => received.push(event.type));
+
+    source.start();
+    source.start();
+    bus.emit("session.deleted", {
+      properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
+    });
+    bus.emit("session.idle", { properties: { sessionID: "child" } });
+    bus.emit("session.error", { properties: { sessionID: "child" } });
+    bus.emit("session.error", { properties: {} });
+    bus.emit("session.deleted", { properties: { info: {} } });
+    bus.emit("session.idle", { properties: {} });
+    await source.stop();
+    bus.emit("session.idle", { properties: { sessionID: "after-stop" } });
+
+    expect(received).toEqual(["subagent.deleted", "subagent.idle", "subagent.error"]);
+    expect(logger.warnings).toEqual(["[subagent] session.error without sessionID"]);
+  });
+
   test("builds an opaque Basic authorization header", () => {
     // Given / When
     const headers = buildSseHeaders({ username: "alice", password: "secret" });
@@ -124,6 +148,137 @@ describe("subagent event sources", () => {
 
     // Then
     expect(receivedSignal?.aborted).toBe(true);
+    expect(logger.warnings).toEqual([]);
+  });
+
+  test("logs stream, resync, and reconnect delay failures", async () => {
+    const logger = new RecordingLogger();
+    let firstSleep = true;
+    let sleepSignal: AbortSignal | undefined;
+    const source = new SseEventSource({
+      subscribe: async () => {
+        throw new Error("stream failed");
+      },
+      listSessions: async () => {
+        throw new Error("resync failed");
+      },
+      auth: {},
+      logger,
+      sleep: async (_delay, signal) => {
+        if (firstSleep) {
+          firstSleep = false;
+          throw new Error("delay failed");
+        }
+        sleepSignal = signal;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+      },
+    });
+
+    source.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await source.stop();
+
+    expect(logger.warnings).toEqual([
+      "[subagent] SSE stream error: stream failed",
+      "[subagent] resync list failed: resync failed",
+      "[subagent] reconnect delay failed: delay failed",
+      "[subagent] SSE stream error: stream failed",
+      "[subagent] resync list failed: resync failed",
+    ]);
+    expect(sleepSignal?.aborted).toBe(true);
+  });
+
+  test("maps SSE events and resyncs only child sessions", async () => {
+    const logger = new RecordingLogger();
+    const received: string[] = [];
+    const source = new SseEventSource({
+      subscribe: async () => ({
+        stream: (async function* (): AsyncGenerator<unknown, void, undefined> {
+          yield {
+            type: "session.created",
+            properties: { info: { id: "child", parentID: "root", time: { created: 1 } } },
+          };
+          yield {
+            type: "session.deleted",
+            properties: { info: { id: "child", parentID: "root", time: { created: 1 } } },
+          };
+          yield { type: "session.idle", properties: { sessionID: "child" } };
+          yield { type: "session.error", properties: { sessionID: "child" } };
+          yield { type: "session.error", properties: {} };
+          yield { type: "unknown" };
+        })(),
+      }),
+      listSessions: async () => [],
+      auth: {},
+      logger,
+      sleep: async (_delay, signal) => {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+      },
+    });
+    source.onEvent((event) => received.push(event.type));
+
+    source.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await source.stop();
+
+    expect(received).toEqual([
+      "subagent.created",
+      "subagent.deleted",
+      "subagent.idle",
+      "subagent.error",
+    ]);
+    expect(logger.warnings).toEqual(["[subagent] session.error without sessionID"]);
+  });
+
+  test("stops immediately when the lifecycle is already aborted", async () => {
+    const lifecycle = new AbortController();
+    lifecycle.abort();
+    let subscribed = false;
+    const source = new SseEventSource({
+      subscribe: async () => {
+        subscribed = true;
+        return { stream: emptyStream() };
+      },
+      listSessions: async () => [],
+      auth: {},
+      logger: new RecordingLogger(),
+      sleep: async () => {},
+      lifecycleSignal: lifecycle.signal,
+    });
+
+    source.start();
+    await source.stop();
+
+    expect(subscribed).toBe(true);
+  });
+
+  test("does not consume a stream resolved after shutdown", async () => {
+    const logger = new RecordingLogger();
+    const source = new SseEventSource({
+      subscribe: async () => ({
+        stream: {
+          [Symbol.asyncIterator]() {
+            return {
+              next: async () => {
+                throw new Error("stream should not be consumed after shutdown");
+              },
+            };
+          },
+        },
+      }),
+      listSessions: async () => [],
+      auth: {},
+      logger,
+      sleep: async () => {},
+    });
+
+    source.start();
+    await source.stop();
+
     expect(logger.warnings).toEqual([]);
   });
 });

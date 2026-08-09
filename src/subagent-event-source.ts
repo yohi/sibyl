@@ -5,7 +5,7 @@ import type { SubagentLikeSession } from "./subagent-types.js";
 export type SubagentEvent =
   | { type: "subagent.created"; session: SubagentLikeSession }
   | { type: "subagent.idle"; sessionId: string }
-  | { type: "subagent.error"; sessionId?: string | undefined }
+  | { type: "subagent.error"; sessionId?: string }
   | { type: "subagent.deleted"; sessionId: string };
 
 export interface SubagentEventSource {
@@ -84,19 +84,20 @@ export class TuiEventBusSource implements SubagentEventSource {
 }
 
 export function buildSseHeaders(auth: {
-  username?: string | undefined;
-  password?: string | undefined;
+  username?: string;
+  password?: string;
 }): Record<string, string> {
   if (auth.password === undefined) return {};
+  const credentials = `${auth.username ?? ""}:${auth.password}`;
   return {
-    Authorization: `Basic ${Buffer.from(`${auth.username ?? ""}:${auth.password}`).toString("base64")}`,
+    Authorization: `Basic ${Buffer.from(credentials).toString("base64")}`,
   };
 }
 
 export interface SseDeps {
   subscribe(signal: AbortSignal): Promise<{ stream: AsyncIterable<unknown> }>;
   listSessions(signal: AbortSignal): Promise<readonly SubagentLikeSession[]>;
-  auth: { username?: string | undefined; password?: string | undefined };
+  auth: { username?: string; password?: string };
   logger: SubagentLogger;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
   lifecycleSignal?: AbortSignal;
@@ -146,38 +147,53 @@ export class SseEventSource implements SubagentEventSource {
     let attempt = 0;
     const signal = this.controller?.signal ?? new AbortController().signal;
     while (!this.stopped) {
-      try {
-        const { stream } = await this.deps.subscribe(signal);
-        attempt = 0;
-        for await (const event of stream) {
-          if (this.stopped) return;
-          this.mapEvent(event);
-        }
-      } catch (error) {
-        if (this.stopped || isAbortError(error)) return;
-        this.deps.logger.warn(`[subagent] SSE stream error: ${sanitizeError(error)}`);
-      }
-      if (this.stopped) return;
-      for (const handler of this.reconnectHandlers) await handler();
-      if (this.stopped) return;
-      try {
-        const sessions = await this.deps.listSessions(signal);
-        for (const session of sessions) {
-          if (session.parentID != null) this.emit({ type: "subagent.created", session });
-        }
-      } catch (error) {
-        if (this.stopped || isAbortError(error)) return;
-        this.deps.logger.warn(`[subagent] resync list failed: ${sanitizeError(error)}`);
-      }
-      if (this.stopped) return;
-      try {
-        await this.deps.sleep(500 * 2 ** Math.min(attempt, 6), signal);
-      } catch (error) {
-        if (this.stopped || isAbortError(error)) return;
-        this.deps.logger.warn(`[subagent] reconnect delay failed: ${sanitizeError(error)}`);
-      }
+      if (await this.consumeStream(signal)) return;
+      if (await this.resyncAfterDisconnect(signal)) return;
+      if (await this.waitBeforeReconnect(attempt, signal)) return;
       attempt += 1;
     }
+  }
+
+  private async consumeStream(signal: AbortSignal): Promise<boolean> {
+    try {
+      const { stream } = await this.deps.subscribe(signal);
+      if (this.stopped || signal.aborted) return true;
+      for await (const event of stream) {
+        if (this.stopped) return true;
+        this.mapEvent(event);
+      }
+      return false;
+    } catch (error) {
+      if (this.stopped || isAbortError(error)) return true;
+      this.deps.logger.warn(`[subagent] SSE stream error: ${sanitizeError(error)}`);
+      return false;
+    }
+  }
+
+  private async resyncAfterDisconnect(signal: AbortSignal): Promise<boolean> {
+    for (const handler of this.reconnectHandlers) await handler();
+    if (this.stopped) return true;
+    try {
+      const sessions = await this.deps.listSessions(signal);
+      for (const session of sessions) {
+        if (session.parentID != null) this.emit({ type: "subagent.created", session });
+      }
+    } catch (error) {
+      if (this.stopped || isAbortError(error)) return true;
+      this.deps.logger.warn(`[subagent] resync list failed: ${sanitizeError(error)}`);
+    }
+    return this.stopped;
+  }
+
+  private async waitBeforeReconnect(attempt: number, signal: AbortSignal): Promise<boolean> {
+    if (this.stopped) return true;
+    try {
+      await this.deps.sleep(500 * 2 ** Math.min(attempt, 6), signal);
+    } catch (error) {
+      if (this.stopped || isAbortError(error)) return true;
+      this.deps.logger.warn(`[subagent] reconnect delay failed: ${sanitizeError(error)}`);
+    }
+    return this.stopped;
   }
 
   private mapEvent(event: unknown): void {
