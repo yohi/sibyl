@@ -17,6 +17,7 @@ export const consoleSubagentLogger: SubagentLogger = {
 };
 
 export function sanitizeSessionId(sessionId: string): string {
+  if (sessionId.length <= 4) return "[redacted]";
   return `${sessionId.slice(0, 4)}…`;
 }
 
@@ -30,7 +31,8 @@ export function sanitizeError(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);
   const redacted = raw
     .replace(/https?:\/\/[^\s]+/giu, "[redacted-url]")
-    .replace(/\b(password|token|secret|authorization)=\S+/giu, "$1=[redacted]");
+    .replace(/\b(password|token|secret|authorization)=\S+/giu, "$1=[redacted]")
+    .replace(/\b(authorization:\s+bearer)\s+\S+/giu, "$1 [redacted]");
   return truncate(redacted);
 }
 
