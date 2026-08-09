@@ -44,6 +44,8 @@ describe("subagent event sources", () => {
     bus.emit("session.created", {
       properties: { info: { id: "root", time: { created: 1 } } },
     });
+    bus.emit("session.idle", { properties: { sessionID: "root" } });
+    bus.emit("session.error", { properties: { sessionID: "root" } });
     bus.emit("session.created", {
       properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
     });
@@ -62,19 +64,34 @@ describe("subagent event sources", () => {
 
     source.start();
     source.start();
-    bus.emit("session.deleted", {
+    bus.emit("session.created", {
       properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
     });
     bus.emit("session.idle", { properties: { sessionID: "child" } });
     bus.emit("session.error", { properties: { sessionID: "child" } });
+    bus.emit("session.deleted", {
+      properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
+    });
     bus.emit("session.error", { properties: {} });
     bus.emit("session.deleted", { properties: { info: {} } });
     bus.emit("session.idle", { properties: {} });
+    bus.emit("session.created", null);
+    bus.emit("session.deleted", undefined);
+    bus.emit("session.idle", null);
+    bus.emit("session.error", undefined);
     await source.stop();
     bus.emit("session.idle", { properties: { sessionID: "after-stop" } });
 
-    expect(received).toEqual(["subagent.deleted", "subagent.idle", "subagent.error"]);
-    expect(logger.warnings).toEqual(["[subagent] session.error without sessionID"]);
+    expect(received).toEqual([
+      "subagent.created",
+      "subagent.idle",
+      "subagent.error",
+      "subagent.deleted",
+    ]);
+    expect(logger.warnings).toEqual([
+      "[subagent] session.error without sessionID",
+      "[subagent] session.error without sessionID",
+    ]);
   });
 
   test("builds an opaque Basic authorization header", () => {
@@ -84,6 +101,32 @@ describe("subagent event sources", () => {
     // Then
     expect(headers.Authorization).toBe(`Basic ${Buffer.from("alice:secret").toString("base64")}`);
     expect(JSON.stringify(headers)).not.toContain("secret");
+  });
+
+  test("applies authentication headers to SSE subscriptions", async () => {
+    let receivedHeaders: Record<string, string> | undefined;
+    const source = new SseEventSource({
+      subscribe: async (_signal, headers) => {
+        receivedHeaders = headers;
+        return { stream: emptyStream() };
+      },
+      listSessions: async () => [],
+      auth: { username: "alice", password: "secret" },
+      logger: new RecordingLogger(),
+      sleep: async (_delay, signal) => {
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+      },
+    });
+
+    source.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await source.stop();
+
+    expect(receivedHeaders).toEqual({
+      Authorization: `Basic ${Buffer.from("alice:secret").toString("base64")}`,
+    });
   });
 
   test("notifies and resyncs before waiting to reconnect", async () => {
@@ -116,6 +159,33 @@ describe("subagent event sources", () => {
     expect(reconnects).toBe(1);
     expect(received).toEqual(["subagent.created"]);
     expect(sleepStarted).toBe(true);
+    await source.stop();
+  });
+
+  test("records reconnect handler failures and continues through backoff", async () => {
+    const logger = new RecordingLogger();
+    let sleepStarted = false;
+    const source = new SseEventSource({
+      subscribe: async () => ({ stream: emptyStream() }),
+      listSessions: async () => [],
+      auth: {},
+      logger,
+      sleep: async (_delay, signal) => {
+        sleepStarted = true;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+      },
+    });
+    source.onReconnectRequired(() => Promise.reject(new Error("handler token=secret failed")));
+
+    source.start();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(sleepStarted).toBe(true);
+    expect(logger.warnings).toEqual([
+      "[subagent] reconnect handler failed: handler token=[redacted] failed",
+    ]);
     await source.stop();
   });
 
@@ -201,12 +271,25 @@ describe("subagent event sources", () => {
             properties: { info: { id: "child", parentID: "root", time: { created: 1 } } },
           };
           yield {
+            type: "session.idle",
+            properties: { sessionID: "child" },
+          };
+          yield {
+            type: "session.error",
+            properties: { sessionID: "child" },
+          };
+          yield {
             type: "session.deleted",
             properties: { info: { id: "child", parentID: "root", time: { created: 1 } } },
           };
-          yield { type: "session.idle", properties: { sessionID: "child" } };
-          yield { type: "session.error", properties: { sessionID: "child" } };
           yield { type: "session.error", properties: {} };
+          yield {
+            type: "session.created",
+            properties: { info: { id: "root", time: { created: 2 } } },
+          };
+          yield { type: "session.idle", properties: { sessionID: "root" } };
+          yield { type: "session.error", properties: { sessionID: "root" } };
+          yield null;
           yield { type: "unknown" };
         })(),
       }),
@@ -227,9 +310,9 @@ describe("subagent event sources", () => {
 
     expect(received).toEqual([
       "subagent.created",
-      "subagent.deleted",
       "subagent.idle",
       "subagent.error",
+      "subagent.deleted",
     ]);
     expect(logger.warnings).toEqual(["[subagent] session.error without sessionID"]);
   });
@@ -253,7 +336,7 @@ describe("subagent event sources", () => {
     source.start();
     await source.stop();
 
-    expect(subscribed).toBe(true);
+    expect(subscribed).toBe(false);
   });
 
   test("does not consume a stream resolved after shutdown", async () => {

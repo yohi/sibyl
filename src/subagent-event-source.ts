@@ -21,6 +21,7 @@ export interface TuiEventBusLike {
 }
 
 function sessionFromEvent(event: unknown): SubagentLikeSession | undefined {
+  if (typeof event !== "object" || event === null) return undefined;
   const info = (event as { properties?: { info?: unknown } }).properties?.info;
   if (typeof info !== "object" || info === null) return undefined;
   const value = info as { id?: unknown; parentID?: unknown; time?: { created?: unknown } };
@@ -30,12 +31,14 @@ function sessionFromEvent(event: unknown): SubagentLikeSession | undefined {
 }
 
 function sessionIdFromEvent(event: unknown): string | undefined {
+  if (typeof event !== "object" || event === null) return undefined;
   const value = (event as { properties?: { sessionID?: unknown } }).properties?.sessionID;
   return typeof value === "string" ? value : undefined;
 }
 
 export class TuiEventBusSource implements SubagentEventSource {
   private readonly handlers: Array<(event: SubagentEvent) => void> = [];
+  private readonly childSessionIds = new Set<string>();
   private offFns: Array<() => void> = [];
 
   constructor(private readonly deps: { eventBus: TuiEventBusLike; logger: SubagentLogger }) {}
@@ -46,15 +49,23 @@ export class TuiEventBusSource implements SubagentEventSource {
     this.offFns = [
       eventBus.on("session.created", (event) => {
         const session = sessionFromEvent(event);
-        if (session !== undefined) this.emit({ type: "subagent.created", session });
+        if (session !== undefined) {
+          this.childSessionIds.add(session.id);
+          this.emit({ type: "subagent.created", session });
+        }
       }),
       eventBus.on("session.deleted", (event) => {
         const session = sessionFromEvent(event);
-        if (session !== undefined) this.emit({ type: "subagent.deleted", sessionId: session.id });
+        if (session !== undefined) {
+          this.childSessionIds.delete(session.id);
+          this.emit({ type: "subagent.deleted", sessionId: session.id });
+        }
       }),
       eventBus.on("session.idle", (event) => {
         const sessionId = sessionIdFromEvent(event);
-        if (sessionId !== undefined) this.emit({ type: "subagent.idle", sessionId });
+        if (sessionId !== undefined && this.childSessionIds.has(sessionId)) {
+          this.emit({ type: "subagent.idle", sessionId });
+        }
       }),
       eventBus.on("session.error", (event) => {
         const sessionId = sessionIdFromEvent(event);
@@ -62,7 +73,7 @@ export class TuiEventBusSource implements SubagentEventSource {
           this.deps.logger.error("[subagent] session.error without sessionID");
           return;
         }
-        this.emit({ type: "subagent.error", sessionId });
+        if (this.childSessionIds.has(sessionId)) this.emit({ type: "subagent.error", sessionId });
       }),
     ];
   }
@@ -70,6 +81,7 @@ export class TuiEventBusSource implements SubagentEventSource {
   async stop(): Promise<void> {
     for (const off of this.offFns) off();
     this.offFns = [];
+    this.childSessionIds.clear();
   }
 
   onEvent(handler: (event: SubagentEvent) => void): void {
@@ -95,7 +107,10 @@ export function buildSseHeaders(auth: {
 }
 
 export interface SseDeps {
-  subscribe(signal: AbortSignal): Promise<{ stream: AsyncIterable<unknown> }>;
+  subscribe(
+    signal: AbortSignal,
+    headers: Readonly<Record<string, string>>,
+  ): Promise<{ stream: AsyncIterable<unknown> }>;
   listSessions(signal: AbortSignal): Promise<readonly SubagentLikeSession[]>;
   auth: { username?: string; password?: string };
   logger: SubagentLogger;
@@ -110,6 +125,7 @@ function isAbortError(error: unknown): boolean {
 export class SseEventSource implements SubagentEventSource {
   private readonly handlers: Array<(event: SubagentEvent) => void> = [];
   private readonly reconnectHandlers: Array<() => Promise<void> | void> = [];
+  private readonly childSessionIds = new Set<string>();
   private stopped = true;
   private loopPromise: Promise<void> | undefined;
   private controller: AbortController | undefined;
@@ -120,8 +136,11 @@ export class SseEventSource implements SubagentEventSource {
     if (!this.stopped) return;
     this.stopped = false;
     this.controller = new AbortController();
-    if (this.deps.lifecycleSignal?.aborted) this.controller.abort();
-    else {
+    if (this.deps.lifecycleSignal?.aborted) {
+      this.stopped = true;
+      this.controller.abort();
+      return;
+    } else {
       this.deps.lifecycleSignal?.addEventListener("abort", () => this.controller?.abort(), {
         once: true,
       });
@@ -132,6 +151,7 @@ export class SseEventSource implements SubagentEventSource {
   async stop(): Promise<void> {
     this.stopped = true;
     this.controller?.abort();
+    this.childSessionIds.clear();
     await this.loopPromise;
   }
 
@@ -147,6 +167,7 @@ export class SseEventSource implements SubagentEventSource {
     let attempt = 0;
     const signal = this.controller?.signal ?? new AbortController().signal;
     while (!this.stopped) {
+      if (signal.aborted) return;
       if (await this.consumeStream(signal)) return;
       if (await this.resyncAfterDisconnect(signal)) return;
       if (await this.waitBeforeReconnect(attempt, signal)) return;
@@ -156,7 +177,7 @@ export class SseEventSource implements SubagentEventSource {
 
   private async consumeStream(signal: AbortSignal): Promise<boolean> {
     try {
-      const { stream } = await this.deps.subscribe(signal);
+      const { stream } = await this.deps.subscribe(signal, buildSseHeaders(this.deps.auth));
       if (this.stopped || signal.aborted) return true;
       for await (const event of stream) {
         if (this.stopped) return true;
@@ -171,12 +192,23 @@ export class SseEventSource implements SubagentEventSource {
   }
 
   private async resyncAfterDisconnect(signal: AbortSignal): Promise<boolean> {
-    for (const handler of this.reconnectHandlers) await handler();
+    for (const handler of this.reconnectHandlers) {
+      try {
+        await handler();
+      } catch (error) {
+        this.deps.logger.warn(`[subagent] reconnect handler failed: ${sanitizeError(error)}`);
+        return false;
+      }
+    }
     if (this.stopped) return true;
     try {
       const sessions = await this.deps.listSessions(signal);
+      this.childSessionIds.clear();
       for (const session of sessions) {
-        if (session.parentID != null) this.emit({ type: "subagent.created", session });
+        if (session.parentID != null) {
+          this.childSessionIds.add(session.id);
+          this.emit({ type: "subagent.created", session });
+        }
       }
     } catch (error) {
       if (this.stopped || isAbortError(error)) return true;
@@ -197,24 +229,32 @@ export class SseEventSource implements SubagentEventSource {
   }
 
   private mapEvent(event: unknown): void {
+    if (typeof event !== "object" || event === null) return;
     const type = (event as { type?: unknown }).type;
     if (type === "session.created") {
       const session = sessionFromEvent(event);
-      if (session !== undefined) this.emit({ type: "subagent.created", session });
+      if (session !== undefined) {
+        this.childSessionIds.add(session.id);
+        this.emit({ type: "subagent.created", session });
+      }
       return;
     }
     if (type === "session.deleted") {
       const session = sessionFromEvent(event);
-      if (session !== undefined) this.emit({ type: "subagent.deleted", sessionId: session.id });
+      if (session !== undefined) {
+        this.childSessionIds.delete(session.id);
+        this.emit({ type: "subagent.deleted", sessionId: session.id });
+      }
       return;
     }
     const sessionId = sessionIdFromEvent(event);
-    if (type === "session.idle" && sessionId !== undefined) {
+    if (type === "session.idle" && sessionId !== undefined && this.childSessionIds.has(sessionId)) {
       this.emit({ type: "subagent.idle", sessionId });
     } else if (type === "session.error") {
       if (sessionId === undefined)
         this.deps.logger.error("[subagent] session.error without sessionID");
-      else this.emit({ type: "subagent.error", sessionId });
+      else if (this.childSessionIds.has(sessionId))
+        this.emit({ type: "subagent.error", sessionId });
     }
   }
 
