@@ -40,12 +40,15 @@ describe("Server plugin", () => {
     expect(output).toEqual({ parts: [] });
   });
 
-  test("registers the subagent display toggle command", async () => {
+  test("registers the subagent display configuration command", async () => {
     const hooks = await Reflect.apply(plugin.server, undefined, [undefined]);
     const config: { command?: Record<string, Record<string, string>> } = {};
 
     await hooks.config?.(config);
 
-    expect(config.command?.["sibyl.toggleSubagentDisplay"]).toBeDefined();
+    expect(config.command?.["sibyl.showSubagentDisplayConfig"]).toEqual({
+      description: "Show Sibyl subagent display configuration",
+      template: "Show the startup configuration for Sibyl subagent display.",
+    });
   });
 });

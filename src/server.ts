@@ -7,9 +7,9 @@ const server: Plugin = async () => ({
       description: "Open Sibyl",
       template: "Open the Sibyl console.",
     };
-    config.command["sibyl.toggleSubagentDisplay"] = {
-      description: "Toggle Sibyl subagent display",
-      template: "Toggle the Sibyl subagent display (configured at startup).",
+    config.command["sibyl.showSubagentDisplayConfig"] = {
+      description: "Show Sibyl subagent display configuration",
+      template: "Show the startup configuration for Sibyl subagent display.",
     };
   },
   "command.execute.before": async (input) => {

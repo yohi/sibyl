@@ -47,7 +47,7 @@ describe("attachSubagentIntegration", () => {
     });
   });
 
-  test("registers the toggle command and returns disabled without connection settings", async () => {
+  test("registers the configuration command and returns disabled without connection settings", async () => {
     const { api, layers } = makeApi({});
     const handle = await attachSubagentIntegration(
       api,
@@ -57,10 +57,10 @@ describe("attachSubagentIntegration", () => {
     const commands = (layers[0] as { commands: Array<{ name: string }> }).commands;
 
     expect(handle.enabled).toBe(false);
-    expect(commands.map((command) => command.name)).toContain("sibyl.toggleSubagentDisplay");
+    expect(commands.map((command) => command.name)).toContain("sibyl.showSubagentDisplayConfig");
     const toggle = (
       layers[0] as { commands: Array<{ name: string; run: () => unknown }> }
-    ).commands.find((command) => command.name === "sibyl.toggleSubagentDisplay");
+    ).commands.find((command) => command.name === "sibyl.showSubagentDisplayConfig");
     await toggle?.run();
     await handle.stop();
   });
@@ -86,7 +86,7 @@ describe("attachSubagentIntegration", () => {
     expect(disposers).toHaveLength(1);
     const commands = (layers[0] as { commands: Array<{ name: string; run: () => unknown }> })
       .commands;
-    await commands.find((command) => command.name === "sibyl.toggleSubagentDisplay")?.run();
+    await commands.find((command) => command.name === "sibyl.showSubagentDisplayConfig")?.run();
     await handle.stop();
   });
 

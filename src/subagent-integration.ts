@@ -7,6 +7,7 @@ import { consoleSubagentLogger } from "./subagent-logger.js";
 import { TuiEventBusSource, SseEventSource } from "./subagent-event-source.js";
 import { SubagentLifecycleManager } from "./subagent-lifecycle-manager.js";
 import { SubagentPaneAdapter } from "./subagent-pane-adapter.js";
+import { sleepWithAbort } from "./abortable-sleep.js";
 import type {
   AttachTarget,
   SubagentLikeSession,
@@ -75,13 +76,13 @@ export async function attachSubagentIntegration(
   runtime.keymap?.registerLayer({
     commands: [
       {
-        name: "sibyl.toggleSubagentDisplay",
-        title: "Toggle Subagent Display",
-        desc: "Subagent display is configured at startup",
+        name: "sibyl.showSubagentDisplayConfig",
+        title: "Show Subagent Display Configuration",
+        desc: "Show the startup configuration for subagent display",
         category: "Plugin",
         run: () => {
           if (config.enabled && config.maxPanes !== 0) {
-            logger.info("[subagent] toggle is config-driven at startup");
+            logger.info("[subagent] display configuration is startup-controlled");
           }
         },
       },
@@ -132,16 +133,7 @@ export async function attachSubagentIntegration(
         auth: { username: connection.username, password: connection.password },
         logger,
         lifecycleSignal: runtime.lifecycle?.signal,
-        sleep: (ms, signal) =>
-          new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(resolve, ms);
-            const abort = () => {
-              clearTimeout(timer);
-              reject(new DOMException("Aborted", "AbortError"));
-            };
-            if (signal.aborted) abort();
-            else signal.addEventListener("abort", abort, { once: true });
-          }),
+        sleep: sleepWithAbort,
       })
     : new TuiEventBusSource({ eventBus: runtime.event ?? { on: () => () => {} }, logger });
   const manager = new SubagentLifecycleManager({
