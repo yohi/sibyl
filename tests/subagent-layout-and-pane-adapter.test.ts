@@ -131,7 +131,7 @@ describe("subagent pane adapter", () => {
     expect(ptyManager.spawnedOptions).toHaveLength(0);
     expect(logger.warnings).toHaveLength(1);
     expect(logger.warnings[0]?.length).toBeLessThanOrEqual(200);
-    expect(logger.warnings[0]).toContain("bad…");
+    expect(logger.warnings[0]).toContain("[redacted]");
     expect(logger.warnings[0]).not.toContain("bad;session");
   });
 });
