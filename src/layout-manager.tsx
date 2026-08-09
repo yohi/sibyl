@@ -21,13 +21,18 @@ export interface LayoutManagerProps {
   readonly controller: LayoutManagerController;
 }
 
+export interface SplitPaneFactoryResult {
+  readonly model: PaneModel;
+  readonly initialPtyHandle?: PtyHandle;
+}
+
 export interface LayoutManagerController {
   readonly model: Accessor<PaneModel>;
   readonly focusedId: Accessor<PaneId | undefined>;
   readonly splitPane: (
     direction: SplitDirection,
     newPtyOptions: PtyOptions,
-    createPane?: (options: PtyOptions) => PaneModel,
+    createPane?: (options: PtyOptions) => PaneModel | SplitPaneFactoryResult,
   ) => void;
   readonly closePane: (id?: PaneId) => Promise<void>;
   readonly focusNext: () => void;
@@ -113,7 +118,7 @@ export function createLayoutManagerController(
   const splitPane = (
     direction: SplitDirection,
     newPtyOptions: PtyOptions,
-    createPane?: (options: PtyOptions) => PaneModel,
+    createPane?: (options: PtyOptions) => PaneModel | SplitPaneFactoryResult,
   ) => {
     const focused = focusedId();
     if (focused === undefined) return;
@@ -122,9 +127,7 @@ export function createLayoutManagerController(
 
     const paneFactory = createPane
       ? (options: PtyOptions): PaneModel => {
-          const result = createPane(options) as
-            | PaneModel
-            | { model: PaneModel; initialPtyHandle?: PtyHandle };
+          const result = createPane(options);
           if ("model" in result) {
             if (result.initialPtyHandle !== undefined) {
               ptyHandleByPane.set(result.model.id, result.initialPtyHandle);
