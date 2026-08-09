@@ -2,7 +2,7 @@
 
 - **対象プロダクト**: `@yohi/sibyl`（OpenCode マルチペイン統合コンソールプラグイン）
 - **ステータス**: 設計確定（実装計画フェーズへ移行可 / 未実装）
-- **関連ドキュメント**: [SPEC.md](../../SPEC.md), [REQUIREMENTS.md](../../REQUIREMENTS.md), [architecture.md](../../architecture.md), [akane 設計書](../../../../oss/akane/docs/subagent-display-and-termination-design.md)
+- **関連ドキュメント**: [SPEC.md](../../SPEC.md), [REQUIREMENTS.md](../../REQUIREMENTS.md), [architecture.md](../../architecture.md), [akane 設計書](../../../oss/akane/docs/subagent-display-and-termination-design.md)
 - **依存取得手順**: 本リポジトリでは `oss/` は `.gitignore` で追跡対象外のため、クリーンチェックアウトでは `akane` / `opentui` / `oh-my-openagent` が存在しない。セットアップ・CI では以下で取得すること。
 
   ```bash
