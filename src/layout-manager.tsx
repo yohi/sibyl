@@ -21,10 +21,19 @@ export interface LayoutManagerProps {
   readonly controller: LayoutManagerController;
 }
 
+export interface SplitPaneFactoryResult {
+  readonly model: PaneModel;
+  readonly initialPtyHandle?: PtyHandle;
+}
+
 export interface LayoutManagerController {
   readonly model: Accessor<PaneModel>;
   readonly focusedId: Accessor<PaneId | undefined>;
-  readonly splitPane: (direction: SplitDirection, newPtyOptions: PtyOptions) => void;
+  readonly splitPane: (
+    direction: SplitDirection,
+    newPtyOptions: PtyOptions,
+    createPane?: (options: PtyOptions) => PaneModel | SplitPaneFactoryResult,
+  ) => void;
   readonly closePane: (id?: PaneId) => Promise<void>;
   readonly focusNext: () => void;
   readonly focusPrev: () => void;
@@ -32,6 +41,7 @@ export interface LayoutManagerController {
   readonly onPtyExit: (paneId: PaneId, ptyId: string) => void;
   readonly onPtyCleanup: (paneId: PaneId, ptyId: string) => Promise<void>;
   readonly focusPane: (paneId: PaneId) => void;
+  readonly forceFocus: (paneId: PaneId) => void;
   readonly getInitialPtyHandle: (paneId: PaneId) => PtyHandle | undefined;
   readonly getPendingPtyHandle: (paneId: PaneId) => Promise<PtyHandle> | undefined;
   readonly onPtySpawn: (paneId: PaneId, promise: Promise<PtyHandle>) => void;
@@ -105,21 +115,32 @@ export function createLayoutManagerController(
     return termination;
   };
 
-  const splitPane = (direction: SplitDirection, newPtyOptions: PtyOptions) => {
+  const splitPane = (
+    direction: SplitDirection,
+    newPtyOptions: PtyOptions,
+    createPane?: (options: PtyOptions) => PaneModel | SplitPaneFactoryResult,
+  ) => {
     const focused = focusedId();
     if (focused === undefined) return;
     const target = findPane(model(), focused);
     if (target === undefined || target.children !== undefined) return;
 
-    setModel((current) =>
-      splitPaneInTree(
-        current,
-        focused,
-        direction,
-        newPtyOptions,
-        paneBackend ? (options) => paneBackend.create(options) : undefined,
-      ),
-    );
+    const paneFactory = createPane
+      ? (options: PtyOptions): PaneModel => {
+          const result = createPane(options);
+          if ("model" in result) {
+            if (result.initialPtyHandle !== undefined) {
+              ptyHandleByPane.set(result.model.id, result.initialPtyHandle);
+            }
+            return result.model;
+          }
+          return result;
+        }
+      : paneBackend
+        ? (options: PtyOptions) => paneBackend.create(options)
+        : undefined;
+
+    setModel((current) => splitPaneInTree(current, focused, direction, newPtyOptions, paneFactory));
   };
 
   const closePane = async (id = focusedId()) => {
@@ -202,6 +223,7 @@ export function createLayoutManagerController(
     onPtyExit,
     onPtyCleanup,
     focusPane: setFocusedId,
+    forceFocus: setFocusedId,
     getInitialPtyHandle,
     getPendingPtyHandle,
     onPtySpawn,
