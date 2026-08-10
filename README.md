@@ -22,6 +22,7 @@ OpenCode TUI 内で以下のショートカットキーおよびコマンドパ�
 | `ctrl+a n` | `sibyl.focus.next` | 次のペインへフォーカス移動 |
 | `ctrl+a p` | `sibyl.focus.prev` | 前のペインへフォーカス移動 |
 | `ctrl+a x` | `sibyl.close` | フォーカス中のペインを閉じる |
+| *(パレットのみ)* | `sibyl.showSubagentDisplayConfig` | サブエージェント自動表示の設定状態を表示 |
 
 ---
 
@@ -42,6 +43,35 @@ OpenCode TUI 内で以下のショートカットキーおよびコマンドパ�
   "plugin": ["@yohi/sibyl/tui"]
 }
 ```
+
+---
+
+## 🤖 Subagent Display Integration
+
+`oh-my-openagent` などのプラグインが起動するサブエージェントセッションを検知し、Sibyl 内に自動ペインとして表示・管理できます（Tmux 不要）。
+
+### 設定項目（`opencode.json` / `tui.json`）
+
+```jsonc
+{
+  "sibyl": {
+    "subagentDisplay": {
+      "enabled": true,   // サブエージェント自動表示の有効化（デフォルト: false）
+      "maxPanes": 4      // 表示ペインの上限数（1〜8、0 で自動閉鎖し無効化）
+    }
+  }
+}
+```
+
+### 環境変数によるオーバーライド
+
+設定は `環境変数 > akane 設定 > sibyl 設定 > pluginInput` の優先順位で項目単位にマージ解決されます。
+
+- `SIBYL_SUBAGENT_ENABLED`: `true` / `false`（または `1` / `0`）
+- `SIBYL_SUBAGENT_MAX_PANES`: 最大表示ペイン数（`1`〜`8`、`0` で無効化）
+- `OPENCODE_SERVER_URL`: OpenCode サーバー URL（例: `http://localhost:4096`）
+- `OPENCODE_PROJECT_DIR`: 対象プロジェクトのルートディレクトリパス
+- `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`: サーバー認証情報（引数やログには露出せず環境変数で安全に伝播）
 
 ---
 
