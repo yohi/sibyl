@@ -22,7 +22,7 @@ OpenCode TUI 内で以下のショートカットキーおよびコマンドパ�
 | `ctrl+a n` | `sibyl.focus.next` | 次のペインへフォーカス移動 |
 | `ctrl+a p` | `sibyl.focus.prev` | 前のペインへフォーカス移動 |
 | `ctrl+a x` | `sibyl.close` | フォーカス中のペインを閉じる |
-| *(パレットのみ)* | `sibyl.showSubagentDisplayConfig` | サブエージェント自動表示の設定状態を表示 |
+| *(パレットのみ)* | `sibyl.showSubagentDisplayConfig` | 有効化されている場合に、サブエージェント自動表示の設定状態（`enabled` と `maxPanes`）を表示 |
 
 ---
 
@@ -65,7 +65,7 @@ OpenCode TUI 内で以下のショートカットキーおよびコマンドパ�
 
 ### 環境変数によるオーバーライド
 
-設定は `環境変数 > akane 設定 > sibyl 設定 > pluginInput` の優先順位で項目単位にマージ解決されます。
+`enabled` と `maxPanes` は `環境変数 > pluginOptions > akane 設定 > sibyl 設定` の優先順位で解決されます。接続設定（`serverUrl` と `directory`）は `環境変数 > pluginOptions > akane 設定 > sibyl 設定 > pluginInput` の優先順位で解決されます。
 
 - `SIBYL_SUBAGENT_ENABLED`: `true` / `false`（または `1` / `0`）
 - `SIBYL_SUBAGENT_MAX_PANES`: 最大表示ペイン数（`1`〜`8`、`0` で無効化）

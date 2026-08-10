@@ -15,7 +15,7 @@ This document expands on the non-negotiable conventions referenced from [AGENTS.
 ## Testing
 
 - Any behavior change must be covered by tests in `tests/`.
-- Run `bun run test` and ensure all tests pass before considering a change complete.
+- Run `bun run lint`, `bun run typecheck`, and `bun run test`, and ensure all checks pass before considering a change complete.
 
 ## PTY Lifecycle
 
