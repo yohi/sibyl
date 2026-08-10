@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.1.0](https://github.com/yohi/sibyl/compare/v1.0.0...v1.1.0) (2026-08-10)
+
+
+### Features
+
+* TUIとサーバーへサブエージェント統合を配線 ([26ef7cf](https://github.com/yohi/sibyl/commit/26ef7cf84a8610b1cf455e6c29ef2fee1df10701))
+* TUIとサーバーへサブエージェント統合を配線 ([bc1f41a](https://github.com/yohi/sibyl/commit/bc1f41a05529caf711d55429ec7bb990c5ecd920))
+* サブエージェントイベント源とSSE再接続を追加 ([cddf019](https://github.com/yohi/sibyl/commit/cddf01919919f1a98cb283c0ecda098c2868a726))
+* サブエージェントイベント源とSSE再接続を追加 ([c714105](https://github.com/yohi/sibyl/commit/c714105d2ed0f19813dcc5e782a7e8e5a460d702))
+* サブエージェントのライフサイクル管理を追加 ([1900fc1](https://github.com/yohi/sibyl/commit/1900fc1bc51dc8fb090703e49f5aa83e18393482))
+* サブエージェントのライフサイクル管理を追加 ([d46f074](https://github.com/yohi/sibyl/commit/d46f074b761a230f13248c849d487bf836fbc882))
+* サブエージェント接続ペインとPTY引き渡しを追加 ([9de0aca](https://github.com/yohi/sibyl/commit/9de0acaa8a5e2116bcf8c07192144da840b6aca5))
+* サブエージェント接続ペインとPTY引き渡しを追加 ([5ef6f72](https://github.com/yohi/sibyl/commit/5ef6f72b2bc23ab2f6246e9ab3e26464ee2eb2a5))
+* サブエージェント設定の検証とログサニタイズを追加 ([e032df9](https://github.com/yohi/sibyl/commit/e032df991fb3a4569161e7d0af50a00ef69b745d))
+* サブエージェント設定の検証とログサニタイズを追加 ([d61af72](https://github.com/yohi/sibyl/commit/d61af721f25f463cf190b48481b14f40627b14ad))
+* サブエージェント設定の項目単位解決を追加 ([21e2981](https://github.com/yohi/sibyl/commit/21e2981dce96defc453b5af09caff5a690949bb7))
+* サブエージェント設定の項目単位解決を追加 ([f3f1ccd](https://github.com/yohi/sibyl/commit/f3f1ccd21b55f66343a00e24084a2e836b739288))
+* サブエージェント連携の設計書を追加しossをignore ([04b0396](https://github.com/yohi/sibyl/commit/04b0396c9189aa6a0ec8f1ddcd2dfb39a9700a4b))
+* サブエージェント連携の設計書を追加しossをignore ([06adce0](https://github.com/yohi/sibyl/commit/06adce0e7e4faee9b8de71e1c2e10668ef09886d))
+
+
+### Bug Fixes
+
+* resync時の孤立ペイン処理を修正 ([84786c0](https://github.com/yohi/sibyl/commit/84786c06555bb501999e761c3d7c09b4546c30f8))
+* sibyl.open コマンドとキーバインドが動作しない問題を修正 ([8542a74](https://github.com/yohi/sibyl/commit/8542a746036c8e973a3dba6c60b044a0147f1c80))
+* sibyl.open の実行とキーバインドが動作しない問題を修正 ([c680aff](https://github.com/yohi/sibyl/commit/c680aff46f9dba46c0c13205a77da15a8d8a7eed))
+* SonarとCodecovのカバレッジ不足を解消 ([b43efa3](https://github.com/yohi/sibyl/commit/b43efa3bb79a3b65b2e06b87d416414f8af0e300))
+* TUIプラグインのnamed export id追加とkeymap設定を修正 ([7bc7d92](https://github.com/yohi/sibyl/commit/7bc7d92f499d5fd8fc249e46b5ba9cf417fd884c))
+* サブエージェントイベント源の安全性を修正 ([22d4369](https://github.com/yohi/sibyl/commit/22d4369ca63afe47c65f63db8652400ea8649d3d))
+* サブエージェントペインの競合とPTYクリーンアップを修正 ([3214ac1](https://github.com/yohi/sibyl/commit/3214ac18b3e36d65b35c5d06f3447db7d65887d2))
+* サブエージェント設定確認とAbort処理を修正 ([bca8cca](https://github.com/yohi/sibyl/commit/bca8ccaf7bc7193bb1dd7e8b2ecd68719d3db87e))
+* セッションID秘匿化テストの期待値を修正 ([a1c0612](https://github.com/yohi/sibyl/commit/a1c061217553104e502b43e6f670cbbed2e5ea6e))
+* 公開APIのテスト期待値を更新 ([b1caa86](https://github.com/yohi/sibyl/commit/b1caa861d460a649f6ae5088e0f47c1ebe0a14a4))
+* 短いセッションIDとBearerトークンのログ漏えいを防止 ([33120d8](https://github.com/yohi/sibyl/commit/33120d85d2bfe72c5fea607229b14ca540d3492b))
+* 空の最大ペイン数設定を拒否 ([9f6a72d](https://github.com/yohi/sibyl/commit/9f6a72d066fd4f0296ba15f0e570525aac25f2c8))
+
 ## 1.0.0 (2026-08-06)
 
 
