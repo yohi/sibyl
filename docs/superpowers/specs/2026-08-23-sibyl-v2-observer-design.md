@@ -88,6 +88,14 @@ directory, or credentials. The PTY-specific
 `createOpenTuiSubagentPaneManager` integration is removed from this path. The
 entry point registers only `sidebar_content` and its disposal cleanup.
 
+The migration removes the legacy `SubagentPaneAdapter` path from the observer
+entry point rather than leaving it available as an alternate code path.
+Accordingly, the TUI plugin must not construct a `PtyManager` or
+`OpenTuiPaneBackend`, create an initial pane/layout controller, register the
+`sibyl` route, or register pane split, focus, or close keymaps for this MVP.
+Observer attachment must be possible without passing PTY, pane-backend, layout,
+route, attach, connection, directory, or credential dependencies.
+
 ### `SubagentRegistry`
 
 `SubagentRegistry` owns normalized runtime state, keyed by child session ID and
@@ -283,6 +291,9 @@ Automated tests cover:
    or `opencode attach` execution. A regression test calls
    `attachSubagentIntegration` and proves it neither initializes a PTY manager
    nor receives PTY, pane-backend, layout, route, or attach dependencies.
+   The same test exercises the TUI entry point with an enabled observer and
+   verifies that it registers only `sidebar_content`; it must fail if a route,
+   pane keymap, PTY manager, pane backend, shell, or attach process is created.
 9. Observer configuration precedence, defaults, validation, and display flags.
    Regression coverage proves legacy display, connection, directory, and PTY
    settings emit only a deprecation warning and cannot alter observer behavior.
