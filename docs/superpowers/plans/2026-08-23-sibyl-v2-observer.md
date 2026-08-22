@@ -470,26 +470,26 @@ export interface SafeSessionProjection {
   readonly updatedAt: number;
 }
 
+export type SafeModelCandidate =
+  | { readonly providerId: string; readonly modelId: string }
+  | { readonly providerId?: never; readonly modelId?: never };
+
 export type SafeMessageProjection =
-  | {
+  | ({
       readonly id: string;
       readonly sessionId: string;
       readonly role: "user";
       readonly createdAt: number;
       readonly agentName: string;
-      readonly providerId: string;
-      readonly modelId: string;
-    }
-  | {
+    } & SafeModelCandidate)
+  | ({
       readonly id: string;
       readonly sessionId: string;
       readonly role: "assistant";
       readonly createdAt: number;
       readonly completedAt?: number;
-      readonly providerId: string;
-      readonly modelId: string;
       readonly hasError: boolean;
-    };
+    } & SafeModelCandidate);
 
 export interface ObserverToolActivity {
   readonly id: string;
@@ -551,6 +551,9 @@ test("redacts before truncation", () => {
 
 ```ts
 test("projects a tool without inspecting payload, title, output, error, attachments, or metadata", () => {
+  const excluded = (field: string): never => {
+    throw new Error(`${field}-secret was accessed`);
+  };
   const projected = projectPart(
     {
       id: "part-1",
@@ -559,14 +562,33 @@ test("projects a tool without inspecting payload, title, output, error, attachme
       type: "tool",
       callID: "call-1",
       tool: "read",
+      get metadata(): never {
+        return excluded("part-metadata");
+      },
       state: {
         status: "completed",
-        input: { token: "input-secret" },
-        output: "output-secret",
-        title: "title-secret",
-        metadata: { secret: "metadata-secret" },
-        attachments: [{ url: "attachment-secret" }],
         time: { start: 10, end: 20 },
+        get input(): never {
+          return excluded("input");
+        },
+        get output(): never {
+          return excluded("output");
+        },
+        get title(): never {
+          return excluded("title");
+        },
+        get error(): never {
+          return excluded("error");
+        },
+        get raw(): never {
+          return excluded("raw");
+        },
+        get metadata(): never {
+          return excluded("metadata");
+        },
+        get attachments(): never {
+          return excluded("attachment");
+        },
       },
     },
     { messageRole: "assistant", observedAt: 20 },
@@ -579,7 +601,48 @@ test("projects a tool without inspecting payload, title, output, error, attachme
     partId: "part-1",
     activity: { id: "part-1", toolName: "read", state: "completed", updatedAt: 20 },
   });
-  expect(JSON.stringify(projected)).not.toMatch(/input-secret|output-secret|title-secret|metadata-secret|attachment-secret/);
+  expect(JSON.stringify(projected)).not.toMatch(
+    /input-secret|output-secret|title-secret|error-secret|raw-secret|metadata-secret|attachment-secret|part-metadata-secret/,
+  );
+});
+
+test("keeps valid messages when provider and model candidates are unavailable", () => {
+  expect(projectMessage({
+    id: "assistant-invalid-model",
+    sessionID: "child",
+    role: "assistant",
+    time: { created: 10 },
+    providerID: "token=provider-secret",
+    modelID: "gpt-5.6",
+  })).toEqual({
+    id: "assistant-invalid-model",
+    sessionId: "child",
+    role: "assistant",
+    createdAt: 10,
+    hasError: false,
+  });
+  expect(projectMessage({
+    id: "user-invalid-model",
+    sessionID: "child",
+    role: "user",
+    time: { created: 11 },
+    agent: "general",
+    model: { providerID: "openai", modelID: "token=model-secret" },
+  })).toEqual({
+    id: "user-invalid-model",
+    sessionId: "child",
+    role: "user",
+    createdAt: 11,
+    agentName: "general",
+  });
+  expect(projectMessage({
+    id: "assistant-valid-model",
+    sessionID: "child",
+    role: "assistant",
+    time: { created: 12 },
+    providerID: "openai",
+    modelID: "gpt-5.6",
+  })).toMatchObject({ providerId: "openai", modelId: "gpt-5.6" });
 });
 
 test("accepts text only from an Assistant message", () => {
@@ -799,7 +862,7 @@ Use a tool part for the `part.upsert` case. Use a text part without a known Assi
 - [ ] **Step 2: Add SSE wrapper, ordering, reconnect, malformed, and stop cases**
 
 ```ts
-test("unwraps global SSE payloads and preserves source order", async () => {
+test("unwraps SDK GlobalEvent payloads and preserves source order", async () => {
   const received: NormalizedObserverEvent[] = [];
   const source = new SseEventSource({
     subscribe: async () => ({
@@ -827,6 +890,11 @@ test("unwraps global SSE payloads and preserves source order", async () => {
 });
 ```
 
+The wrapper fixture above is the SDK `GlobalEvent` shape. Keep its `directory`
+routing field in the test; do not simplify it to direct events. The same
+normalizer must also accept project-scoped `api.client.event.subscribe()` items,
+which arrive as direct event objects.
+
 Assert that `stop()` aborts a pending subscription, reconnect handlers run before backoff after a stream error or unexpected completion, unknown events emit nothing, a `session.error` without `sessionID` logs only a static sanitized warning, and calling `start()` twice does not duplicate subscriptions.
 
 - [ ] **Step 3: Run event-source tests and observe failures from the old reduced union**
@@ -837,7 +905,7 @@ Expected: FAIL because the current source subscribes to only four event names an
 
 - [ ] **Step 4: Implement one unknown-input normalizer shared by both sources**
 
-Register all eleven event names in `TuiEventBusSource`. Normalize `properties` payloads immediately and never log or stringify raw events. For SSE, accept either a direct event object or `{ payload: event }`; reject all other wrapper shapes.
+Register all eleven event names in `TuiEventBusSource`. Normalize `properties` payloads immediately and never log or stringify raw events. For SSE, accept either a direct event object or any record whose `payload` property is an event record, including the SDK `{ directory, project?, workspace?, payload }` `GlobalEvent` envelope. Treat wrapper metadata as routing-only data, do not require exact-key equality, and reject non-record payloads and unrelated wrapper shapes.
 
 For `message.part.updated`:
 
@@ -1058,7 +1126,7 @@ export class SubagentRegistry {
 }
 ```
 
-- [ ] **Step 1: Write the subscribe-before-snapshot race test**
+- [ ] **Step 1: Write initial-hydration and resync snapshot race tests**
 
 ```ts
 test("subscribes before hydration and replays buffered events in source order", async () => {
@@ -1084,6 +1152,73 @@ test("subscribes before hydration and replays buffered events in source order", 
     views: [{ sessionId: "child", status: "busy" }],
   });
 });
+
+test("replays status changes and message removals that arrive during resync", async () => {
+  const source = new MemoryObserverEventSource();
+  const resyncRead = createDeferred<ObserverParentSnapshot>();
+  let readCount = 0;
+  const childWithMessage = {
+    session: {
+      id: "child-message",
+      parentSessionId: "root",
+      createdAt: 2,
+      updatedAt: 2,
+    },
+    status: "busy",
+    messages: [{
+      id: "assistant-1",
+      sessionId: "child-message",
+      role: "assistant",
+      createdAt: 2,
+      providerId: "openai",
+      modelId: "gpt-5.6",
+      hasError: false,
+    }],
+    parts: [],
+  } satisfies HydratedSubagent;
+  const initial = {
+    parentSessionId: "root",
+    children: [
+      hydratedChild("child-update", "root", "idle", 1),
+      childWithMessage,
+    ],
+    omittedCount: 0,
+    ignoredSessionIdsSeen: [],
+  } satisfies ObserverParentSnapshot;
+  const registry = registryFor({
+    source,
+    readParent: () => {
+      readCount += 1;
+      return readCount === 1 ? Promise.resolve(initial) : resyncRead.promise;
+    },
+  });
+
+  await registry.selectParent("root");
+  const resyncing = registry.resyncNow();
+  await Promise.resolve();
+  expect(readCount).toBe(2);
+  source.emit(statusChanged("child-update", "busy", 10));
+  source.emit(messageRemoved("child-message", "assistant-1", 11));
+  resyncRead.resolve({
+    parentSessionId: "root",
+    children: [
+      hydratedChild("child-update", "root", "idle", 1),
+      childWithMessage,
+    ],
+    omittedCount: 0,
+    ignoredSessionIdsSeen: [],
+  });
+  await resyncing;
+
+  expect(registry.snapshot().views.find((view) => view.sessionId === "child-update"))
+    .toMatchObject({ status: "busy" });
+  const childAfterRemoval = registry.snapshot().views.find(
+    (view) => view.sessionId === "child-message",
+  );
+  expect(childAfterRemoval).toBeDefined();
+  expect(childAfterRemoval).not.toHaveProperty("providerId");
+  expect(childAfterRemoval).not.toHaveProperty("modelId");
+});
 ```
 
 - [ ] **Step 2: Add parent, agent/model, status, and tool transition tests**
@@ -1104,6 +1239,38 @@ Emit a newer Assistant Message using another provider/model and assert the exist
 - [ ] **Step 3: Add capacity, overflow, retention, restoration, and bound tests**
 
 Use fake time and timers. Fill eight active entries, emit a ninth, and assert the eight active entries remain plus `overflowCount: 1`. Mark one idle, advance beyond `idleRetentionMs`, run its timer, and verify the idle entry is evicted before a resync restores the highest-urgency omitted child.
+
+Lock the initial snapshot count separately from event-driven overflow:
+
+```ts
+test("reports children omitted by the initial bounded snapshot", async () => {
+  const allChildren = Array.from({ length: 9 }, (_, index) =>
+    hydratedChild(`child-${index + 1}`, "root", "idle", index + 1),
+  );
+  const registry = registryFor({
+    config: { ...DEFAULT_OBSERVER_CONFIG, maxTrackedSubagents: 8 },
+    readParent: (_parentSessionId, config) => Promise.resolve({
+      parentSessionId: "root",
+      children: allChildren.slice(0, config.maxTrackedSubagents),
+      omittedCount: Math.max(0, allChildren.length - config.maxTrackedSubagents),
+      ignoredSessionIdsSeen: [],
+    }),
+  });
+
+  await registry.selectParent("root");
+
+  expect(registry.snapshot().views).toHaveLength(8);
+  expect(registry.snapshot().overflowCount).toBe(1);
+});
+```
+
+Add a stale-resync deletion case for a known capacity-omitted child. Fill all
+eight tracked slots, emit an upsert for `child-9` so it enters the bounded
+omitted-ID set, then emit its deletion. Record the `ignoredSessionIds` argument
+received by `readParent`, return a stale fixture that still contains `child-9`,
+and assert the ignored set contains `child-9` and the ready Registry snapshot
+does not. Also assert the tombstone is removed only after a later successful
+snapshot no longer reports that ID in `ignoredSessionIdsSeen`.
 
 Burst 10,000 malformed and unknown-child events. Assert:
 
@@ -1135,7 +1302,22 @@ Expected: FAIL because `SubagentRegistry` does not exist.
 
 Subscribe and start the event source before calling `readParent`. Increment a `selectionGeneration` for every `selectParent`; discard a completed hydration if its generation is stale. Buffer normalized events by `sessionId` while hydration is in progress, cap pending child buckets at `maxTrackedSubagents`, and cap each bucket at `MESSAGE_REFERENCE_LIMIT + PART_REFERENCE_LIMIT + 8` events by coalescing the newest event for the same message, part, status, or tool identity.
 
-On successful hydration, replace the active parent's tracked map, apply buffered events in ascending `sequence`, set `ready: true`, then notify subscribers. On hydration failure other than abort, log a sanitized warning, expose an empty ready snapshot, and keep the event source alive.
+Use one saturating addition helper for snapshot and event overflow accounting:
+
+```ts
+function saturatingAdd(left: number, right: number): number {
+  return Math.min(Number.MAX_SAFE_INTEGER, left + right);
+}
+```
+
+On successful hydration, replace the active parent's tracked map, initialize
+`overflowCount` from `snapshot.omittedCount` with `saturatingAdd(0,
+snapshot.omittedCount)`, apply buffered events in ascending `sequence`, set
+`ready: true`, then notify subscribers. A later successful resync replaces the
+previous snapshot-derived overflow base instead of cumulatively adding the same
+omissions again; only replayed post-watermark events add to that base. On
+hydration failure other than abort, log a sanitized warning, expose an empty
+ready snapshot, and keep the event source alive.
 
 For `part.refresh`, maintain at most one in-flight `readMessage` call per tracked child. If another refresh arrives for that child, retain only the newest `{ messageId, sequence }` and run it after the current read settles. Tag every read with `selectionGeneration`; apply it only when the generation and parent still match and the child remains tracked. Replace that message's previous safe message/part projections atomically, reapply reference limits, and never log an `AbortError` or raw client error payload. Abort all refresh controllers on parent change and stop. Test a deferred refresh followed by parent change and prove its late result cannot update the new parent.
 
@@ -1169,9 +1351,9 @@ Use `unknown` as the agent name when none of AgentPart, Subtask, or UserMessage 
 
 Delete immediately on `session.deleted`. On idle, set `retentionDeadline = observedAt + idleRetentionMs`; if the duration is zero, remove immediately. Cancel that deadline when a later busy, retry, or error event arrives. Before admitting a new child at capacity, evict the least-recent idle child whose deadline has elapsed. If no entry is eligible, keep every retained child, omit the new detail, and increment the aggregate overflow counter. Repeated events for an already-known omitted ID must not increment the counter again; keep only a capped omitted-ID deduplication set of `maxTrackedSubagents`, then use saturating aggregate increments for additional unseen overflow.
 
-Call `resyncNow()` after deletion, retention expiry, and source reconnect. `selectParent()` itself performs the new parent's initial snapshot read. Serialize resync calls through one in-flight promise and rerun once when another request arrives while it is active.
+Call `resyncNow()` after deletion, retention expiry, and source reconnect. `selectParent()` itself performs the new parent's initial snapshot read. Before every `readParent` call, capture the highest event `sequence` already applied as a watermark and enter the same bounded/coalescing buffering mode used by initial hydration. Events newer than the watermark must not mutate the tracked map while the snapshot is in flight. After a successful read, replace the tracked map and snapshot-derived overflow base, then replay buffered events in ascending `sequence` before notifying subscribers. If a resync read fails without aborting or changing parent generation, retain the existing map and replay the buffered events onto it so the failed read cannot lose live updates. Serialize this whole read-replace-replay operation through one in-flight promise and rerun once when another request arrives while it is active.
 
-Keep a bounded deleted-session tombstone set, capped at `maxTrackedSubagents`, and add only IDs that were tracked or pending direct children. Pass it to `readParent` as `ignoredSessionIds` so a stale server snapshot cannot consume capacity or resurrect a just-deleted card. Retain IDs returned in `ignoredSessionIdsSeen`, remove absent IDs after a successful resync, and clear all tombstones on parent change or stop.
+Keep a bounded deleted-session tombstone set, capped at `maxTrackedSubagents`, and add IDs that were tracked, pending direct children, or present in the bounded capacity-omitted ID set. Add the tombstone before requesting resync. For a known omitted deletion, remove the ID from omitted deduplication and decrement a non-saturated overflow count with a floor of zero; if the aggregate is already saturated, leave it saturated until the next successful snapshot establishes an authoritative base. Pass tombstones to `readParent` as `ignoredSessionIds` so a stale server snapshot cannot consume capacity or resurrect a just-deleted card. Retain IDs returned in `ignoredSessionIdsSeen`, remove absent IDs after a successful resync, and clear all tombstones and omitted-ID state on parent change or stop.
 
 - [ ] **Step 8: Coalesce subscriber notifications and implement complete disposal**
 
@@ -1757,7 +1939,7 @@ Expected: one draft PR per branch. Do not merge any PR.
 ## Final Acceptance Checklist
 
 - [ ] One, four, and eight direct children render; eight cards are scrollable.
-- [ ] Events arriving during hydration are replayed after the snapshot in source order.
+- [ ] Events arriving during initial hydration or resync are replayed after the snapshot in source order.
 - [ ] Parent changes show only the newly selected parent's direct children.
 - [ ] Agent resolution is AgentPart, then Subtask, then UserMessage.
 - [ ] Model resolution is newest Assistant provider/model, then UserMessage model.
@@ -1765,9 +1947,11 @@ Expected: one draft PR per branch. Do not merge any PR.
 - [ ] A tool transitions pending → running → completed/error without duplicate activity identities.
 - [ ] Assistant text and explicitly public reasoning summaries are redacted before truncation and conditionally rendered.
 - [ ] Session/message/part IDs and agent/provider/model/tool names are redacted and syntax-checked before storage; secret-like identifiers are dropped or shown as `unknown`.
-- [ ] Raw reasoning, tool payloads, output, errors, titles, attachments, metadata, credentials, and environment values never enter a Registry snapshot or rendered frame.
+- [ ] Raw reasoning, tool payloads, output, errors, titles, attachments, metadata, credentials, and environment values are never inspected for projection and never enter a Registry snapshot or rendered frame.
 - [ ] Deletion is immediate; idle retention obeys 0 through 3,600,000 ms.
 - [ ] Active entries are never evicted at capacity; overflow is one bounded aggregate counter.
+- [ ] Initial snapshot `omittedCount` is visible in the first ready Registry snapshot without cumulative resync double-counting.
+- [ ] Deleting a known capacity-omitted child tombstones it so a stale resync cannot resurrect it.
 - [ ] Hidden/omitted direct children are reconsidered after deletion, retention expiry, parent change, and resync.
 - [ ] Malformed events and event bursts do not crash the TUI or exceed declared memory bounds.
 - [ ] The TUI registers only `sidebar_content` and constructs no route, keymap, PTY, pane backend, shell, or attach process.
