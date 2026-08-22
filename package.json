@@ -64,6 +64,6 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
-    "@babel/core": "^7.23.3"
+    "@babel/core": "^8.0.1"
   }
 }
