@@ -1,6 +1,10 @@
 codecov:
   branch: master
 
+ignore:
+  - "dist/**"
+  - "tests/**"
+
 coverage:
   status:
     project:
