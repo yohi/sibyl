@@ -111,6 +111,8 @@ export function SidebarObserver(props: SidebarObserverProps): JSX.Element {
 
   const omittedCount = () => {
     const current = snapshot();
+    if (!props.config.enabled || !current.ready || current.parentSessionId !== props.sessionId)
+      return 0;
     const visibleLimit = Math.max(0, props.config.maxVisibleSubagents);
     return current.overflowCount + Math.max(0, current.views.length - visibleLimit);
   };

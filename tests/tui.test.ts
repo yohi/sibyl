@@ -8,7 +8,11 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  process.env.SIBYL_OBSERVER_ENABLED = originalObserverEnabled;
+  if (originalObserverEnabled === undefined) {
+    delete process.env.SIBYL_OBSERVER_ENABLED;
+  } else {
+    process.env.SIBYL_OBSERVER_ENABLED = originalObserverEnabled;
+  }
 });
 
 function makeApi(config: unknown, warnings: string[] = []) {

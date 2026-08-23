@@ -312,7 +312,10 @@ export function LayoutNode(props: LayoutNodeProps) {
               const childModel = findPane(props.model(), childId);
               if (childModel === undefined) return null;
               return (
-                <box flexGrow={childModel.weight ?? 1}>
+                <box
+                  flexGrow={findPane(props.model(), childId)?.weight ?? childModel.weight ?? 1}
+                  flexBasis={0}
+                >
                   <LayoutNode
                     model={() => findPane(props.model(), childId) ?? childModel}
                     ptyManager={props.ptyManager}

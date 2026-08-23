@@ -108,6 +108,20 @@ describe("observer safe projections", () => {
     ).toMatchObject({ providerId: "openai", modelId: "gpt-5.6" });
   });
 
+  test("does not treat nullish error values as assistant errors", () => {
+    const message = {
+      id: "assistant-nullish-error",
+      sessionID: "child",
+      role: "assistant",
+      time: { created: 10 },
+    } as const;
+
+    expect(projectMessage(message)).toMatchObject({ hasError: false });
+    expect(projectMessage({ ...message, error: undefined })).toMatchObject({ hasError: false });
+    expect(projectMessage({ ...message, error: null })).toMatchObject({ hasError: false });
+    expect(projectMessage({ ...message, error: "failed" })).toMatchObject({ hasError: true });
+  });
+
   test("accepts text only from an Assistant message", () => {
     const textPart = {
       id: "text-1",

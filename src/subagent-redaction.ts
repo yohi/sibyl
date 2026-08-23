@@ -1,5 +1,9 @@
 const REDACTED = "[redacted]";
 const SENSITIVE_NAME = `(?:authorization|password|secret|token|api[_-]?key|apikey)`;
+const NAMED_VALUE_PATTERN = new RegExp(
+  `\\b(${SENSITIVE_NAME})(\\s*[:=]\\s*)(?:"[^"]*"|'[^']*'|[^\\s,;]+)`,
+  "giu",
+);
 
 export const LATEST_TEXT_LIMIT = 160;
 export const REASONING_SUMMARY_LIMIT = 160;
@@ -9,7 +13,7 @@ export const CORRELATION_ID_LIMIT = 128;
 
 function redactNamedValues(text: string): string {
   return text.replace(
-    new RegExp(`\\b(${SENSITIVE_NAME})(\\s*[:=]\\s*)(?:"[^"]*"|'[^']*'|[^\\s,;]+)`, "giu"),
+    NAMED_VALUE_PATTERN,
     (_match, name: string, separator: string) => `${name}${separator}${REDACTED}`,
   );
 }

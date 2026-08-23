@@ -9,6 +9,7 @@ import type {
 } from "../src/subagent-snapshot-reader";
 import type { SubagentLogger } from "../src/subagent-logger";
 import type { SafePartProjection } from "../src/subagent-types";
+import { createDeferred } from "./helpers/deferred";
 
 class RecordingLogger implements SubagentLogger {
   readonly warnings: string[] = [];
@@ -55,20 +56,6 @@ class MemoryObserverEventSource implements ObserverEventSource {
   async reconnect(): Promise<void> {
     for (const handler of this.reconnectHandlers) await handler();
   }
-}
-
-function deferred<T>(): {
-  promise: Promise<T>;
-  resolve(value: T): void;
-  reject(reason: unknown): void;
-} {
-  let resolvePromise: (value: T) => void = () => {};
-  let rejectPromise: (reason: unknown) => void = () => {};
-  const promise = new Promise<T>((resolve, reject) => {
-    resolvePromise = resolve;
-    rejectPromise = reject;
-  });
-  return { promise, resolve: resolvePromise, reject: rejectPromise };
 }
 
 function hydratedChild(
@@ -178,7 +165,7 @@ function registryFor(
 describe("SubagentRegistry", () => {
   test("subscribes before hydration and replays buffered events in source order", async () => {
     const source = new MemoryObserverEventSource();
-    const hydration = deferred<ObserverParentSnapshot>();
+    const hydration = createDeferred<ObserverParentSnapshot>();
     const { registry } = registryFor({
       source,
       readParent: () => hydration.promise,
@@ -200,7 +187,7 @@ describe("SubagentRegistry", () => {
 
   test("replays status changes and message removals that arrive during resync", async () => {
     const source = new MemoryObserverEventSource();
-    const resyncRead = deferred<ObserverParentSnapshot>();
+    const resyncRead = createDeferred<ObserverParentSnapshot>();
     let readCount = 0;
     const childWithMessage = hydratedChild("child-message", "root", "busy", 2, [
       {
@@ -335,6 +322,30 @@ describe("SubagentRegistry", () => {
     expect(view.recentActivity.map((activity) => activity.id)).toEqual(["tool-1"]);
   });
 
+  test("does not advance sequence for an event that loses session ownership", async () => {
+    const { registry, source } = registryFor({
+      readParent: async () => snapshot("root", [hydratedChild("child", "root")]),
+    });
+    await registry.selectParent("root");
+
+    let sessionIdReads = 0;
+    const message = {
+      id: "assistant-1",
+      get sessionId(): string {
+        sessionIdReads += 1;
+        return sessionIdReads === 1 ? "child" : "other";
+      },
+      role: "assistant" as const,
+      createdAt: 1,
+      hasError: false,
+    };
+    source.emit({ type: "message.upsert", sequence: 10, observedAt: 10, message });
+
+    source.emit(statusChanged("child", "busy", 9));
+
+    expect(registry.snapshot().views[0]?.status).toBe("busy");
+  });
+
   test("reports initial snapshot omissions and never evicts active entries", async () => {
     const allChildren = Array.from({ length: 9 }, (_, index) =>
       hydratedChild(`child-${index + 1}`, "root", "busy", index + 1),
@@ -376,7 +387,7 @@ describe("SubagentRegistry", () => {
   });
 
   test("drops a late message refresh after parent selection changes", async () => {
-    const refresh = deferred<{ readonly message?: never; readonly parts: readonly [] }>();
+    const refresh = createDeferred<{ readonly message?: never; readonly parts: readonly [] }>();
     const { registry, source } = registryFor({
       readParent: async (parentSessionId) =>
         snapshot(parentSessionId, [hydratedChild("child", parentSessionId)]),

@@ -127,7 +127,7 @@ export function projectMessage(value: unknown): SafeMessageProjection | undefine
     role: "assistant" as const,
     createdAt,
     ...(completedAt === undefined ? {} : { completedAt }),
-    hasError: Object.hasOwn(value, "error"),
+    hasError: Object.hasOwn(value, "error") && value.error !== undefined && value.error !== null,
   };
   return withModel(base, value.providerID, value.modelID) as SafeMessageProjection;
 }

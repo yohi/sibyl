@@ -243,3 +243,30 @@ test("selects the active parent and renders one aggregate overflow line", async 
     setup.renderer.destroy();
   }
 });
+
+test("hides the omitted line when the sidebar is not displayable", async () => {
+  const registry = new FakeRegistry({
+    parentSessionId: "root",
+    ready: true,
+    overflowCount: 3,
+    views: [view()],
+  });
+  const setup = await testRender(
+    () => (
+      <SidebarObserver
+        registry={registry}
+        config={config({ enabled: false })}
+        sessionId="root"
+        theme={theme}
+      />
+    ),
+    { width: 42, height: 10 },
+  );
+
+  try {
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).not.toContain("omitted");
+  } finally {
+    setup.renderer.destroy();
+  }
+});

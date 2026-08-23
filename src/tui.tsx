@@ -1,11 +1,6 @@
 import type { TuiPlugin, TuiPluginModule } from "@opencode-ai/plugin/tui";
 import { resolveObserverConfig } from "./subagent-config.js";
-import {
-  attachSubagentIntegration,
-  type ObserverIntegrationApi,
-  type ObserverIntegrationDependencies,
-  type ObserverIntegrationHandle,
-} from "./subagent-integration.js";
+import { attachSubagentIntegration } from "./subagent-integration.js";
 import { consoleSubagentLogger, type SubagentLogger } from "./subagent-logger.js";
 
 export interface TuiPluginDependencies {
@@ -34,7 +29,11 @@ export function createTuiPlugin(deps: TuiPluginDependencies = {}): TuiPlugin {
 }
 
 export { attachSubagentIntegration };
-export type { ObserverIntegrationApi, ObserverIntegrationDependencies, ObserverIntegrationHandle };
+export type {
+  ObserverIntegrationApi,
+  ObserverIntegrationDependencies,
+  ObserverIntegrationHandle,
+} from "./subagent-integration.js";
 
 export const id = "oh-my-opencode.sibyl";
 

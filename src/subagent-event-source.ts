@@ -143,6 +143,154 @@ function propertiesOf(value: EventRecord): EventRecord | undefined {
   return isRecord(value.properties) ? value.properties : undefined;
 }
 
+interface NormalizationContext {
+  readonly properties: EventRecord;
+  readonly sequence: number;
+  readonly observedAt: number;
+}
+
+type EventNormalizer = (context: NormalizationContext) => NormalizedObserverEvent | undefined;
+
+function normalizeSessionUpsert({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const session = projectSession(properties.info);
+  return session === undefined
+    ? undefined
+    : { type: "session.upsert", sequence, observedAt, session };
+}
+
+function normalizeSessionDeleted({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID) ?? projectSession(properties.info)?.id;
+  return sessionId === undefined
+    ? undefined
+    : { type: "session.deleted", sequence, observedAt, sessionId };
+}
+
+function normalizeMessageUpsert({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const message = projectMessage(properties.info);
+  return message === undefined
+    ? undefined
+    : { type: "message.upsert", sequence, observedAt, message };
+}
+
+function normalizeMessageRemoved({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID);
+  const messageId = safeCorrelationId(properties.messageID);
+  return sessionId === undefined || messageId === undefined
+    ? undefined
+    : { type: "message.removed", sequence, observedAt, sessionId, messageId };
+}
+
+function normalizePartUpdated({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const part = properties.part;
+  const identifiers = readPartIdentifiers(part);
+  if (identifiers === undefined) return undefined;
+  const partRecord = isRecord(part) ? part : undefined;
+  if (partRecord?.type === "text" || partRecord?.type === "reasoning") {
+    return { type: "part.refresh", sequence, observedAt, ...identifiers };
+  }
+  const projected = projectPart(part, { messageRole: undefined, observedAt });
+  return projected === undefined
+    ? undefined
+    : { type: "part.upsert", sequence, observedAt, part: projected };
+}
+
+function normalizePartRemoved({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID);
+  const messageId = safeCorrelationId(properties.messageID);
+  const partId = safeCorrelationId(properties.partID);
+  return sessionId === undefined || messageId === undefined || partId === undefined
+    ? undefined
+    : { type: "part.removed", sequence, observedAt, sessionId, messageId, partId };
+}
+
+function normalizeStatusChanged({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID);
+  if (sessionId === undefined) return undefined;
+  return {
+    type: "status.changed",
+    sequence,
+    observedAt,
+    sessionId,
+    status: normalizeRuntimeStatus(properties.status),
+  };
+}
+
+function normalizeSessionIdle({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID);
+  return sessionId === undefined
+    ? undefined
+    : { type: "session.idle", sequence, observedAt, sessionId };
+}
+
+function normalizeSessionError({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID);
+  return sessionId === undefined
+    ? undefined
+    : { type: "session.error", sequence, observedAt, sessionId };
+}
+
+function normalizeSessionRetry({
+  properties,
+  sequence,
+  observedAt,
+}: NormalizationContext): NormalizedObserverEvent | undefined {
+  const sessionId = safeCorrelationId(properties.sessionID);
+  const attempt = finiteNumber(properties.attempt);
+  return sessionId === undefined || attempt === undefined || !Number.isInteger(attempt)
+    ? undefined
+    : { type: "session.retry", sequence, observedAt, sessionId, attempt };
+}
+
+const EVENT_NORMALIZERS: Readonly<Record<string, EventNormalizer>> = {
+  "session.created": normalizeSessionUpsert,
+  "session.updated": normalizeSessionUpsert,
+  "session.deleted": normalizeSessionDeleted,
+  "message.updated": normalizeMessageUpsert,
+  "message.removed": normalizeMessageRemoved,
+  "message.part.updated": normalizePartUpdated,
+  "message.part.removed": normalizePartRemoved,
+  "session.status": normalizeStatusChanged,
+  "session.idle": normalizeSessionIdle,
+  "session.error": normalizeSessionError,
+  "session.next.retried": normalizeSessionRetry,
+};
+
 function normalizedEvent(
   value: unknown,
   sequence: number,
@@ -151,86 +299,8 @@ function normalizedEvent(
   if (!isRecord(value) || typeof value.type !== "string") return undefined;
   const properties = propertiesOf(value);
   if (properties === undefined) return undefined;
-  const type = value.type;
-
-  if (type === "session.created" || type === "session.updated") {
-    const session = projectSession(properties.info);
-    return session === undefined
-      ? undefined
-      : { type: "session.upsert", sequence, observedAt, session };
-  }
-  if (type === "session.deleted") {
-    const sessionId =
-      safeCorrelationId(properties.sessionID) ?? projectSession(properties.info)?.id;
-    return sessionId === undefined
-      ? undefined
-      : { type: "session.deleted", sequence, observedAt, sessionId };
-  }
-  if (type === "message.updated") {
-    const message = projectMessage(properties.info);
-    return message === undefined
-      ? undefined
-      : { type: "message.upsert", sequence, observedAt, message };
-  }
-  if (type === "message.removed") {
-    const sessionId = safeCorrelationId(properties.sessionID);
-    const messageId = safeCorrelationId(properties.messageID);
-    return sessionId === undefined || messageId === undefined
-      ? undefined
-      : { type: "message.removed", sequence, observedAt, sessionId, messageId };
-  }
-  if (type === "message.part.updated") {
-    const part = properties.part;
-    const identifiers = readPartIdentifiers(part);
-    if (identifiers === undefined) return undefined;
-    const partRecord = isRecord(part) ? part : undefined;
-    if (partRecord?.type === "text" || partRecord?.type === "reasoning") {
-      return { type: "part.refresh", sequence, observedAt, ...identifiers };
-    }
-    const projected = projectPart(part, { messageRole: undefined, observedAt });
-    return projected === undefined
-      ? undefined
-      : { type: "part.upsert", sequence, observedAt, part: projected };
-  }
-  if (type === "message.part.removed") {
-    const sessionId = safeCorrelationId(properties.sessionID);
-    const messageId = safeCorrelationId(properties.messageID);
-    const partId = safeCorrelationId(properties.partID);
-    return sessionId === undefined || messageId === undefined || partId === undefined
-      ? undefined
-      : { type: "part.removed", sequence, observedAt, sessionId, messageId, partId };
-  }
-  if (type === "session.status") {
-    const sessionId = safeCorrelationId(properties.sessionID);
-    if (sessionId === undefined) return undefined;
-    return {
-      type: "status.changed",
-      sequence,
-      observedAt,
-      sessionId,
-      status: normalizeRuntimeStatus(properties.status),
-    };
-  }
-  if (type === "session.idle") {
-    const sessionId = safeCorrelationId(properties.sessionID);
-    return sessionId === undefined
-      ? undefined
-      : { type: "session.idle", sequence, observedAt, sessionId };
-  }
-  if (type === "session.error") {
-    const sessionId = safeCorrelationId(properties.sessionID);
-    return sessionId === undefined
-      ? undefined
-      : { type: "session.error", sequence, observedAt, sessionId };
-  }
-  if (type === "session.next.retried") {
-    const sessionId = safeCorrelationId(properties.sessionID);
-    const attempt = finiteNumber(properties.attempt);
-    return sessionId === undefined || attempt === undefined || !Number.isInteger(attempt)
-      ? undefined
-      : { type: "session.retry", sequence, observedAt, sessionId, attempt };
-  }
-  return undefined;
+  const normalizer = EVENT_NORMALIZERS[value.type];
+  return normalizer?.({ properties, sequence, observedAt });
 }
 
 function eventType(value: unknown): string | undefined {
@@ -349,22 +419,30 @@ export class SseEventSource implements ObserverEventSource {
     while (this.started && !signal.aborted) {
       const shouldStop = await this.consumeStream(signal);
       if (shouldStop || !this.started || signal.aborted) return;
-      for (const handler of this.reconnectHandlers) {
-        try {
-          await handler();
-        } catch (error) {
-          if (!this.started || signal.aborted || isAbortError(error)) return;
-          this.deps.logger.warn(`[subagent] reconnect handler failed: ${sanitizeError(error)}`);
-        }
-      }
+      await this.runReconnectHandlers(signal);
       if (!this.started || signal.aborted) return;
+      await this.waitForReconnect(signal, attempt);
+      attempt += 1;
+    }
+  }
+
+  private async runReconnectHandlers(signal: AbortSignal): Promise<void> {
+    for (const handler of this.reconnectHandlers) {
       try {
-        await this.deps.sleep(500 * 2 ** Math.min(attempt, 6), signal);
+        await handler();
       } catch (error) {
         if (!this.started || signal.aborted || isAbortError(error)) return;
-        this.deps.logger.warn(`[subagent] reconnect delay failed: ${sanitizeError(error)}`);
+        this.deps.logger.warn(`[subagent] reconnect handler failed: ${sanitizeError(error)}`);
       }
-      attempt += 1;
+    }
+  }
+
+  private async waitForReconnect(signal: AbortSignal, attempt: number): Promise<void> {
+    try {
+      await this.deps.sleep(500 * 2 ** Math.min(attempt, 6), signal);
+    } catch (error) {
+      if (!this.started || signal.aborted || isAbortError(error)) return;
+      this.deps.logger.warn(`[subagent] reconnect delay failed: ${sanitizeError(error)}`);
     }
   }
 

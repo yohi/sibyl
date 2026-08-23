@@ -654,44 +654,23 @@ export class SubagentRegistry {
   private applyEvent(event: NormalizedObserverEvent, suppressResync: boolean): void {
     const parentSessionId = this.parentSessionId;
     if (parentSessionId === undefined) return;
-    const sessionId = eventSessionId(event);
 
     if (event.type === "session.upsert") {
-      if (event.session.parentSessionId !== parentSessionId || this.tombstones.has(sessionId))
-        return;
-      const existing = this.tracked.get(sessionId);
-      if (existing !== undefined) {
-        if (event.sequence < existing.lastSequence) return;
-        existing.session = event.session;
-        existing.updatedAt = Math.max(
-          existing.updatedAt,
-          event.observedAt,
-          event.session.updatedAt,
-        );
-        existing.lastSequence = event.sequence;
-        return;
-      }
-      const admitted = this.admitChild(event.session, "unknown", event.observedAt);
-      if (admitted !== undefined) {
-        admitted.lastSequence = event.sequence;
-      }
+      this.applySessionUpsert(event);
       return;
     }
 
     if (event.type === "session.deleted") {
-      const wasTracked = this.tracked.has(sessionId);
-      this.removeTracked(sessionId);
-      this.pending.delete(sessionId);
-      this.removeOmitted(sessionId);
-      this.addTombstone(sessionId);
-      if ((wasTracked || this.tombstones.has(sessionId)) && !suppressResync) {
-        void this.resyncNow();
-      }
+      this.applySessionDeleted(event, suppressResync);
       return;
     }
 
+    const sessionId = eventSessionId(event);
     const child = this.tracked.get(sessionId);
-    if (child === undefined || event.sequence < child.lastSequence) return;
+    if (child === undefined) return;
+    if (event.type === "message.upsert" && event.message.sessionId !== child.session.id) return;
+    if (event.type === "part.upsert" && event.part.sessionId !== child.session.id) return;
+    if (event.sequence < child.lastSequence) return;
     child.lastSequence = event.sequence;
     child.updatedAt = Math.max(child.updatedAt, event.observedAt);
 
@@ -709,7 +688,6 @@ export class SubagentRegistry {
         this.applyStatus(child, "retry", event.observedAt);
         break;
       case "message.upsert":
-        if (event.message.sessionId !== sessionId) return;
         child.messages.set(event.message.id, event.message);
         if (event.message.role === "assistant" && event.message.hasError) {
           child.messageError = true;
@@ -721,7 +699,6 @@ export class SubagentRegistry {
         child.messageError = hasAssistantError(child.messages.values());
         break;
       case "part.upsert":
-        if (event.part.sessionId !== sessionId) return;
         child.parts.set(event.part.partId, event.part);
         break;
       case "part.removed":
@@ -730,6 +707,46 @@ export class SubagentRegistry {
       case "part.refresh":
         this.queueRefresh(sessionId, event.messageId, event.sequence);
         break;
+    }
+  }
+
+  private applySessionUpsert(
+    event: Extract<NormalizedObserverEvent, { readonly type: "session.upsert" }>,
+  ): void {
+    const parentSessionId = this.parentSessionId;
+    if (
+      parentSessionId === undefined ||
+      event.session.parentSessionId !== parentSessionId ||
+      this.tombstones.has(event.session.id)
+    ) {
+      return;
+    }
+    const existing = this.tracked.get(event.session.id);
+    if (existing !== undefined) {
+      if (event.sequence < existing.lastSequence) return;
+      existing.session = event.session;
+      existing.updatedAt = Math.max(existing.updatedAt, event.observedAt, event.session.updatedAt);
+      existing.lastSequence = event.sequence;
+      return;
+    }
+    const admitted = this.admitChild(event.session, "unknown", event.observedAt);
+    if (admitted !== undefined) {
+      admitted.lastSequence = event.sequence;
+    }
+  }
+
+  private applySessionDeleted(
+    event: Extract<NormalizedObserverEvent, { readonly type: "session.deleted" }>,
+    suppressResync: boolean,
+  ): void {
+    const sessionId = event.sessionId;
+    const wasTracked = this.tracked.has(sessionId);
+    this.removeTracked(sessionId);
+    this.pending.delete(sessionId);
+    this.removeOmitted(sessionId);
+    this.addTombstone(sessionId);
+    if ((wasTracked || this.tombstones.has(sessionId)) && !suppressResync) {
+      void this.resyncNow();
     }
   }
 

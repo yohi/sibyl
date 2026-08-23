@@ -165,14 +165,14 @@ export function resolveObserverConfig(args: {
   readonly hostConfig: unknown;
   readonly env: Readonly<Record<string, string | undefined>>;
 }): ObserverConfigResolution {
-  const pluginOptions =
-    args.pluginOptions === undefined
-      ? undefined
-      : isRecord(args.pluginOptions)
-        ? args.pluginOptions
-        : (() => {
-            throw new Error("Invalid observer configuration");
-          })();
+  let pluginOptions: ConfigRecord | undefined;
+  if (args.pluginOptions === undefined) {
+    pluginOptions = undefined;
+  } else if (isRecord(args.pluginOptions)) {
+    pluginOptions = args.pluginOptions;
+  } else {
+    throw new Error("Invalid observer configuration");
+  }
   const pluginObserver = observerRecord(recordValue(pluginOptions, "observer"));
   const hostObserver = readHostObserver(args.hostConfig);
 
