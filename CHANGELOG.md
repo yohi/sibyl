@@ -1,5 +1,25 @@
 # Changelog
 
+## [2.0.0](https://github.com/yohi/sibyl/compare/v1.1.0...v2.0.0) (2026-08-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* Observer-only TUI runtimeへ移行
+
+### Features
+
+* Observer-only TUI runtimeへ移行 ([3ac038a](https://github.com/yohi/sibyl/commit/3ac038a76ecb2a36787e5f43f506500669bae640))
+* ペイン重量をレイアウトへ反映 ([a70a753](https://github.com/yohi/sibyl/commit/a70a75321bdff788758d4f3ef4b4cf1875a3321b))
+
+
+### Bug Fixes
+
+* CodecovとSonarのLCOVレポート上書きを防止 ([8a298ea](https://github.com/yohi/sibyl/commit/8a298ea03275df9331b6d32ef4fa4304ddf26fe8))
+* CodecovとSonarのカバレッジテストを統一 ([5bcffb7](https://github.com/yohi/sibyl/commit/5bcffb7fc2522dcb0df11b8dcdea4eebd5f51eba))
+* Observerのイベント処理とペイン比率を修正 ([bf8da2d](https://github.com/yohi/sibyl/commit/bf8da2d5e4e4edf7780fe5e6f71fa03b63f88bca))
+* スナップショットIDの並び順を安定化 ([b988fe5](https://github.com/yohi/sibyl/commit/b988fe5113446bf0e4204476f0719fd69d94f0af))
+* 公開API変更に合わせてメジャーバージョンを更新 ([2a77433](https://github.com/yohi/sibyl/commit/2a774337e995668c614b2577dbb41bf4ac7552c9))
 ## Unreleased
 
 ### Breaking Changes
