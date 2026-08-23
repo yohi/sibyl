@@ -1,34 +1,68 @@
-export type ParsedMaxPanes = { readonly ok: true; readonly value: number } | { readonly ok: false };
+export type ObserverIntegerName =
+  | "maxVisibleSubagents"
+  | "maxTrackedSubagents"
+  | "activityLimit"
+  | "idleRetentionMs";
+
+export type ObserverBooleanName =
+  | "enabled"
+  | "showModel"
+  | "showProvider"
+  | "showLatestText"
+  | "showReasoningSummary";
+
+const INTEGER_BOUNDS: Record<ObserverIntegerName, readonly [number, number]> = {
+  maxVisibleSubagents: [1, 8],
+  maxTrackedSubagents: [8, 256],
+  activityLimit: [1, 20],
+  idleRetentionMs: [0, 3_600_000],
+};
 
 export class SubagentValidationError extends Error {
   readonly name = "SubagentValidationError";
 
   constructor(subject: string) {
-    super(`Invalid subagent ${subject}`);
+    super(`Invalid ${subject}`);
   }
 }
 
-export function parseMaxPanesValue(value: unknown): ParsedMaxPanes {
-  if (typeof value !== "number" || !Number.isFinite(value)) return { ok: false };
-  if (!Number.isInteger(value) || value < 0 || value > 8) return { ok: false };
-  return { ok: true, value };
+export function parseObserverBoolean(
+  name: ObserverBooleanName,
+  value: unknown,
+  fromEnvironment: boolean,
+): boolean {
+  if (!fromEnvironment && typeof value === "boolean") return value;
+  if (fromEnvironment && value === "true") return true;
+  if (fromEnvironment && value === "1") return true;
+  if (fromEnvironment && value === "false") return false;
+  if (fromEnvironment && value === "0") return false;
+  throw new SubagentValidationError(`observer ${name}`);
 }
 
-export function validateServerUrl(value: string): boolean {
-  if (value.length === 0) return false;
-
-  try {
-    const url = new URL(value);
-    return (
-      (url.protocol === "http:" || url.protocol === "https:") &&
-      url.username.length === 0 &&
-      url.password.length === 0
-    );
-  } catch {
-    return false;
+export function parseObserverInteger(
+  name: ObserverIntegerName,
+  value: unknown,
+  fromEnvironment: boolean,
+): number {
+  const parsed =
+    fromEnvironment && typeof value === "string" && /^\d+$/u.test(value) ? Number(value) : value;
+  const [minimum, maximum] = INTEGER_BOUNDS[name];
+  if (
+    typeof parsed !== "number" ||
+    !Number.isSafeInteger(parsed) ||
+    parsed < minimum ||
+    parsed > maximum
+  ) {
+    throw new SubagentValidationError(`observer ${name}`);
   }
+  return parsed;
 }
 
-export function validateSessionId(value: string): boolean {
-  return /^[A-Za-z0-9-]+$/.test(value);
+export function validateObserverCapacity(
+  maxVisibleSubagents: number,
+  maxTrackedSubagents: number,
+): void {
+  if (maxTrackedSubagents < maxVisibleSubagents) {
+    throw new SubagentValidationError("observer maxTrackedSubagents");
+  }
 }

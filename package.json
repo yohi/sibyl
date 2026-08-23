@@ -1,7 +1,7 @@
 {
   "name": "@yohi/sibyl",
   "version": "1.1.0",
-  "description": "OpenTUI + PTY multi-pane plugin for OpenCode",
+  "description": "Read-only OpenCode sidebar observer for direct child-agent sessions",
   "type": "module",
   "repository": {
     "type": "git",
@@ -22,10 +22,6 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
-    "./server": {
-      "types": "./dist/server.d.ts",
-      "import": "./dist/server.js"
-    },
     "./tui": {
       "types": "./dist/tui.d.ts",
       "import": "./dist/tui.js"
@@ -34,7 +30,7 @@
   "scripts": {
     "build": "tsc --emitDeclarationOnly && rollup -c",
     "build:types": "tsc --emitDeclarationOnly",
-    "test": "bun test && bun test --conditions=browser --preload @opentui/solid/preload ./tests/pane-render.integration.tsx ./tests/pty-render-latency.integration.tsx",
+    "test": "bun test --path-ignore-patterns 'tests/subagent-observer.test.tsx' --path-ignore-patterns 'tests/subagent-integration.test.ts' && bun test --conditions=browser --preload @opentui/solid/preload ./tests/subagent-observer.test.tsx ./tests/subagent-integration.test.ts ./tests/pane-render.integration.tsx ./tests/pty-render-latency.integration.tsx",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",

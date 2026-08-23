@@ -1,7 +1,56 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import plugin, { createTuiPlugin } from "../src/tui";
 
-import { createDeferred } from "./helpers/deferred";
+const originalObserverEnabled = process.env.SIBYL_OBSERVER_ENABLED;
+
+beforeAll(() => {
+  delete process.env.SIBYL_OBSERVER_ENABLED;
+});
+
+afterAll(() => {
+  process.env.SIBYL_OBSERVER_ENABLED = originalObserverEnabled;
+});
+
+function makeApi(config: unknown, warnings: string[] = []) {
+  const disposers: Array<() => void | Promise<void>> = [];
+  const registrations: unknown[] = [];
+  const routeCalls: unknown[] = [];
+  const keymapCalls: unknown[] = [];
+  const api = {
+    state: { config },
+    slots: {
+      register(plugin: unknown): string {
+        registrations.push(plugin);
+        return `registration-${registrations.length}`;
+      },
+    },
+    route: {
+      register: (routes: unknown) => {
+        routeCalls.push(routes);
+        return () => {};
+      },
+      navigate: (...args: unknown[]) => routeCalls.push(args),
+    },
+    keymap: {
+      registerLayer: (layer: unknown) => {
+        keymapCalls.push(layer);
+        return () => {};
+      },
+    },
+    lifecycle: {
+      signal: new AbortController().signal,
+      onDispose(handler: () => void | Promise<void>) {
+        disposers.push(handler);
+        return () => {};
+      },
+    },
+  };
+  return { api, disposers, warnings, registrations, routeCalls, keymapCalls };
+}
+
+function handle() {
+  return { enabled: false, stop: async () => {}, resyncNow: async () => {} };
+}
 
 describe("TUI plugin", () => {
   test("exports default plugin object", () => {
@@ -10,210 +59,43 @@ describe("TUI plugin", () => {
     expect(typeof plugin.tui).toBe("function");
   });
 
-  test("registers the Sibyl route, keymap layer, and dispose handler", async () => {
-    const routes: Array<{ name: string }> = [];
-    const layers: Array<{
-      commands?: Array<Record<string, unknown>>;
-      bindings?: Array<Record<string, unknown>>;
-    }> = [];
-    const disposeHandlers: Array<() => void> = [];
-
-    const api = {
-      route: {
-        register: (registeredRoutes: Array<{ name: string }>) => {
-          routes.push(...registeredRoutes);
-          return () => {};
-        },
+  test("passes observer plugin options to attachment without route or keymap calls", async () => {
+    let receivedEnabled: boolean | undefined;
+    const { api, registrations, routeCalls, keymapCalls } = makeApi({});
+    const tui = createTuiPlugin({
+      env: {},
+      attach: async (runtime, config) => {
+        receivedEnabled = config.enabled;
+        runtime.slots.register({ slots: { sidebar_content: () => null } });
+        return handle();
       },
-      keymap: {
-        registerLayer: (layer: {
-          commands?: Array<Record<string, unknown>>;
-          bindings?: Array<Record<string, unknown>>;
-        }) => {
-          layers.push(layer);
-          return () => {};
-        },
-      },
-      lifecycle: {
-        onDispose: (handler: () => void) => {
-          disposeHandlers.push(handler);
-          return () => {};
-        },
-      },
-    };
-
-    await Reflect.apply(plugin.tui, undefined, [api, undefined, undefined]);
-
-    expect(routes.map((route) => route.name)).toContain("sibyl");
-    expect(layers).toHaveLength(1);
-    expect(layers[0]?.commands?.map((command) => command.name)).toEqual(
-      expect.arrayContaining([
-        "sibyl.open",
-        "sibyl.split.horizontal",
-        "sibyl.split.vertical",
-        "sibyl.focus.next",
-        "sibyl.focus.prev",
-        "sibyl.close",
-      ]),
-    );
-    expect(disposeHandlers).toHaveLength(1);
-  });
-
-  test("marks pane operation bindings as consumed before PTY input handlers run", async () => {
-    // Given
-    const layers: Array<{
-      bindings?: Array<{ readonly cmd?: string; readonly preventDefault?: boolean }>;
-    }> = [];
-    const api = {
-      route: { register: () => () => {}, navigate: () => {} },
-      keymap: {
-        registerLayer: (layer: {
-          bindings?: Array<{ readonly cmd?: string; readonly preventDefault?: boolean }>;
-        }) => {
-          layers.push(layer);
-          return () => {};
-        },
-      },
-      lifecycle: { onDispose: () => () => {} },
-    };
-
-    // When
-    await Reflect.apply(plugin.tui, undefined, [api, undefined, undefined]);
-
-    // Then
-    const operationCommands = new Set([
-      "sibyl.split.horizontal",
-      "sibyl.split.vertical",
-      "sibyl.focus.next",
-      "sibyl.focus.prev",
-      "sibyl.close",
-    ]);
-    const operationBindings = layers[0]?.bindings?.filter((binding) =>
-      operationCommands.has(binding.cmd ?? ""),
-    );
-    expect(operationBindings).toBeArray();
-    expect(operationBindings?.length).toBe(operationCommands.size);
-    expect(operationBindings?.every((binding) => binding.preventDefault === true)).toBe(true);
-  });
-
-  test("returns a dispose promise that settles after PTY termination", async () => {
-    // Given
-    const tuiModule = await import("../src/tui");
-    const factory = Reflect.get(tuiModule, "createTuiPlugin");
-    expect(factory).toBeFunction();
-    if (typeof factory !== "function") throw new Error("TUI plugin factory is missing");
-
-    const termination = createDeferred<void>();
-    const disposeHandlers: Array<() => void | Promise<void>> = [];
-    const api = {
-      route: { register: () => () => {} },
-      keymap: { registerLayer: () => () => {} },
-      lifecycle: {
-        onDispose: (handler: () => void | Promise<void>) => {
-          disposeHandlers.push(handler);
-          return () => {};
-        },
-      },
-    };
-    const ptyManager = {
-      spawn: async () => {
-        throw new Error("Spawn is not used during plugin registration");
-      },
-      terminate: async () => {},
-      terminateAll: () => termination.promise,
-    };
-    const tui = factory(ptyManager);
-    await Reflect.apply(tui, undefined, [api, undefined, undefined]);
-    const dispose = disposeHandlers[0];
-    if (!dispose) throw new Error("Dispose handler is missing");
-
-    // When
-    const result = dispose();
-
-    // Then
-    expect(result).toBeInstanceOf(Promise);
-    if (result === undefined) throw new Error("Dispose did not return a promise");
-    let settled = false;
-    result.then(() => {
-      settled = true;
     });
-    await Promise.resolve();
-    expect(settled).toBe(false);
-    termination.resolve();
-    await result;
-    expect(settled).toBe(true);
+
+    await Reflect.apply(tui, undefined, [api, { observer: { enabled: true } }, undefined]);
+
+    expect(receivedEnabled).toBe(true);
+    expect(registrations).toHaveLength(1);
+    expect(Object.keys((registrations[0] as { slots: object }).slots)).toEqual(["sidebar_content"]);
+    expect(routeCalls).toEqual([]);
+    expect(keymapCalls).toEqual([]);
   });
 
-  test("rejects the dispose promise when PTY termination fails", async () => {
-    // Given
-    const disposeHandlers: Array<() => void | Promise<void>> = [];
-    const api = {
-      route: { register: () => () => {} },
-      keymap: { registerLayer: () => () => {} },
-      lifecycle: {
-        onDispose: (handler: () => void | Promise<void>) => {
-          disposeHandlers.push(handler);
-          return () => {};
-        },
+  test("warns once per invocation when legacy settings are present and ignores them", async () => {
+    const warnings: string[] = [];
+    const { api } = makeApi({ sibyl: { subagentDisplay: { enabled: true, maxPanes: 4 } } });
+    const tui = createTuiPlugin({
+      env: { SIBYL_SUBAGENT_ENABLED: "true", OPENCODE_SERVER_URL: "http://localhost:3000" },
+      logger: { info: () => {}, warn: (message) => warnings.push(message), error: () => {} },
+      attach: async (_runtime, config) => {
+        expect(config.enabled).toBe(false);
+        return handle();
       },
-    };
-    const ptyManager = {
-      spawn: async () => {
-        throw new Error("Spawn is not used during plugin registration");
-      },
-      terminate: async () => {},
-      terminateAll: async () => {
-        throw new Error("termination failed");
-      },
-    };
-    const tuiModule = await import("../src/tui");
-    const tui = tuiModule.createTuiPlugin(ptyManager);
+    });
+
     await Reflect.apply(tui, undefined, [api, undefined, undefined]);
-    const dispose = disposeHandlers[0];
-    if (!dispose) throw new Error("Dispose handler is missing");
 
-    // When
-    const result = dispose();
-
-    // Then
-    expect(result).toBeInstanceOf(Promise);
-    await expect(result).rejects.toThrow("termination failed");
-  });
-
-  test("invokes the subagent integration factory when provided", async () => {
-    const calls: unknown[] = [];
-    const api = {
-      route: {
-        register: (
-          registeredRoutes: Array<{
-            render: (props: { params: Record<string, string> }) => unknown;
-          }>,
-        ) => {
-          expect(registeredRoutes).toHaveLength(1);
-          return () => {};
-        },
-      },
-      keymap: { registerLayer: () => () => {} },
-      lifecycle: { onDispose: () => () => {} },
-    };
-    const ptyManager = {
-      spawn: async () => {
-        throw new Error("Spawn is not used during plugin registration");
-      },
-      terminate: async () => {},
-      terminateAll: async () => {},
-    };
-    const integration = async (...args: unknown[]) => {
-      calls.push(args);
-      return { enabled: false, stop: async () => {}, resyncNow: async () => {} };
-    };
-
-    await Reflect.apply(createTuiPlugin(ptyManager, undefined, integration), undefined, [
-      api,
-      { enabled: true },
-      undefined,
+    expect(warnings).toEqual([
+      "[subagent] legacy PTY display, connection, and attach settings are deprecated and ignored by Sibyl v2 Observer",
     ]);
-
-    expect(calls).toHaveLength(1);
   });
 });

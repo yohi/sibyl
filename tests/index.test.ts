@@ -1,41 +1,37 @@
 import { describe, expect, test } from "bun:test";
 
-describe("server-safe package entrypoint", () => {
-  test("exports core modules without UI components", async () => {
+describe("published package entrypoints", () => {
+  test("exports observer-safe core modules without legacy PTY integration", async () => {
     const exports = await import("../dist/index.js");
 
-    expect(Object.keys(exports).sort()).toEqual([
-      "OpenTuiPaneBackend",
-      "PtyManager",
-      "SseEventSource",
+    expect(Object.keys(exports)).toEqual(
+      expect.arrayContaining([
+        "DEFAULT_OBSERVER_CONFIG",
+        "SubagentRegistry",
+        "SseEventSource",
+        "SubagentValidationError",
+        "TuiEventBusSource",
+        "createOpenCodeSnapshotReader",
+        "normalizeRuntimeStatus",
+        "redactAndTruncate",
+        "resolveObserverConfig",
+        "safeToolName",
+      ]),
+    );
+
+    for (const removed of [
       "SubagentLifecycleManager",
       "SubagentPaneAdapter",
-      "SubagentValidationError",
-      "TuiEventBusSource",
       "attachSubagentIntegration",
       "buildAttachPtyOptions",
       "buildSseHeaders",
-      "closePane",
-      "consoleSubagentLogger",
       "createDefaultAttachTarget",
       "createOpenTuiSubagentPaneManager",
-      "findPane",
-      "formatSubagentError",
-      "isWindows",
-      "nextLeaf",
-      "parseMaxPanesValue",
-      "prevLeaf",
+      "getLastLifecycleOpenTarget",
       "resolveConnection",
-      "resolveOpencodeCommand",
-      "resolveSubagentConfig",
-      "sanitizeError",
-      "sanitizeSessionId",
-      "splitPane",
-      "stripAnsi",
-      "truncate",
-      "validateServerUrl",
-      "validateSessionId",
-    ]);
+    ]) {
+      expect(Object.keys(exports)).not.toContain(removed);
+    }
   });
 
   test("loads the published TUI plugin without a browser global", async () => {
@@ -48,6 +44,12 @@ describe("server-safe package entrypoint", () => {
       {
         cwd: process.cwd(),
         stderr: "pipe",
+        env: {
+          ...process.env,
+          SIBYL_OBSERVER_ENABLED: undefined,
+          SIBYL_SUBAGENT_ENABLED: undefined,
+          OPENCODE_SERVER_URL: undefined,
+        },
       },
     );
 
@@ -55,134 +57,86 @@ describe("server-safe package entrypoint", () => {
     expect(await new Response(child.stderr).text()).toBe("");
   });
 
-  test("uses the shared Solid runtime in the published TUI bundle", async () => {
+  test("keeps the TUI bundle Observer-only", async () => {
     const bundle = await Bun.file(new URL("../dist/tui.js", import.meta.url)).text();
     const rollupConfig = await Bun.file(new URL("../rollup.config.js", import.meta.url)).text();
 
-    expect(bundle).toMatch(/from\s*["']solid-js["']/);
+    expect(bundle).toContain("sidebar_content");
+    expect(bundle).not.toMatch(/sibyl\.open|sibyl\.split|opencode attach|Bun\.Terminal|node-pty/);
     expect(bundle.length, "Published TUI bundle size exceeds expected limit").toBeLessThan(100_000);
     expect(rollupConfig).toMatch(/external/);
   });
 
-  test("renders PTY output and cleans up through the OpenCode Solid runtime", async () => {
+  test("renders a hydrated direct child through the published sidebar slot", async () => {
     const child = Bun.spawn(
       [
         "bun",
         "--preload",
         "@opentui/solid/preload",
         "-e",
-        `import "@opentui/solid/runtime-plugin-support";
+        `import { RGBA } from "@opentui/core";
 import { testRender } from "@opentui/solid";
-const { createTuiPlugin } = await import("./dist/tui.js");
-const dataCallbacks = new Set();
-const terminated = [];
-const handle = {
-  id: "pty-1",
-  write() {},
-  resize() {},
-  onData(callback) { dataCallbacks.add(callback); return () => dataCallbacks.delete(callback); },
-  onExit() { return () => {}; },
+const { attachSubagentIntegration, createTuiPlugin } = await import("./dist/tui.js");
+const color = RGBA.fromHex("#ffffff");
+const theme = { error: color, warning: color, info: color, success: color, text: color, textMuted: color, backgroundPanel: color };
+const source = { start() {}, async stop() {}, onEvent() { return () => {}; }, onReconnectRequired() { return () => {}; } };
+const reader = {
+  async readParent(parentSessionId) {
+    return {
+      parentSessionId,
+      children: [{
+        session: { id: "child-1", parentSessionId, createdAt: 1, updatedAt: 2 },
+        status: "busy",
+        messages: [{ id: "message-1", sessionId: "child-1", role: "user", createdAt: 1, agentName: "explore" }],
+        parts: [],
+      }],
+      omittedCount: 0,
+      ignoredSessionIdsSeen: [],
+    };
+  },
+  async readMessage() { return { parts: [] }; },
 };
-const ptyManager = {
-  async spawn() { return handle; },
-  async terminate(id) { terminated.push(id); },
-  async terminateAll() {},
+const registrations = [];
+const disposers = [];
+let handle;
+const api = {
+  client: {},
+  event: { on() { return () => {}; } },
+  state: { config: {}, session: { get() {}, messages() { return []; }, status() {} }, part() { return []; } },
+  theme: { current: theme },
+  slots: { register(plugin) { registrations.push(plugin); return "registration-1"; } },
+  lifecycle: { signal: new AbortController().signal, onDispose(fn) { disposers.push(fn); return () => {}; } },
 };
-let route;
-await createTuiPlugin(ptyManager)({
-  route: { register(routes) { route = routes[0]; return () => {}; }, navigate() {} },
-  keymap: { registerLayer() { return () => {}; } },
-  lifecycle: { onDispose() { return () => {}; } },
+const tui = createTuiPlugin({
+  env: { SIBYL_OBSERVER_ENABLED: "true" },
+  attach: async (runtime, config) => {
+    handle = await attachSubagentIntegration(runtime, config, { eventSource: source, snapshotReader: reader });
+    return handle;
+  },
 });
-const setup = await testRender(() => route.render({}), { width: 40, height: 8 });
+await Reflect.apply(tui, undefined, [api, undefined, undefined]);
+const slot = registrations[0]?.slots.sidebar_content;
+if (!slot) throw new Error("Missing sidebar_content slot");
+const setup = await testRender(() => slot({ theme: api.theme }, { session_id: "parent-1" }), { width: 40, height: 8 });
 await setup.renderOnce();
 await Promise.resolve();
-for (const callback of dataCallbacks) callback("sibyl-output\\n");
+await Promise.resolve();
 await setup.renderOnce();
 const frame = setup.captureCharFrame();
 setup.renderer.destroy();
-await Promise.resolve();
-if (!frame.includes("sibyl-output")) throw new Error("Missing expected PTY output in frame");
-if (terminated.join(",") !== "pty-1") throw new Error("Unexpected terminated PTYs: " + (terminated.join(",") || "(none)"));`,
+await handle.stop();
+if (!frame.includes("explore")) throw new Error("Missing child agent in frame");
+if (!frame.includes("BUSY")) throw new Error("Missing child status in frame");`,
       ],
       {
         cwd: process.cwd(),
         stderr: "pipe",
-      },
-    );
-
-    expect(await child.exited).toBe(0);
-    expect(await new Response(child.stderr).text()).toBe("");
-  });
-
-  test("preserves the surviving PTY session when split collapse remounts its pane", async () => {
-    const child = Bun.spawn(
-      [
-        "bun",
-        "--preload",
-        "@opentui/solid/preload",
-        "-e",
-        `import "@opentui/solid/runtime-plugin-support";
-import { testRender } from "@opentui/solid";
-const { createTuiPlugin } = await import("./dist/tui.js");
-let nextPtyId = 0;
-const terminated = [];
-const exitCallbacks = new Map();
-const ptyManager = {
-  async spawn() {
-    const id = \`pty-\${++nextPtyId}\`;
-    const callbacks = new Set();
-    exitCallbacks.set(id, callbacks);
-    return {
-      id,
-      write() {},
-      resize() {},
-      onData() { return () => {}; },
-      onExit(callback) { callbacks.add(callback); return () => callbacks.delete(callback); },
-    };
-  },
-  async terminate(id) {
-    terminated.push(id);
-    for (const callback of exitCallbacks.get(id) ?? []) callback({ exitCode: 0 });
-    exitCallbacks.delete(id);
-  },
-  async terminateAll() {},
-};
-let route;
-let layer;
-await createTuiPlugin(ptyManager)({
-  route: { register(routes) { route = routes[0]; return () => {}; }, navigate() {} },
-  keymap: { registerLayer(value) { layer = value; return () => {}; } },
-  lifecycle: { onDispose() { return () => {}; } },
-});
-const setup = await testRender(() => route.render({}), { width: 80, height: 24 });
-try {
-  const render = async () => {
-    await setup.renderOnce();
-    await Promise.resolve();
-    await Promise.resolve();
-  };
-  const run = (name) => {
-    const command = layer.commands.find((candidate) => candidate.name === name);
-    if (!command) throw new Error(\`Missing command: \${name}\`);
-    return command.run();
-  };
-  await render();
-  await run("sibyl.split.horizontal");
-  await render();
-  if (nextPtyId !== 2) throw new Error(\`Expected 2 PTY spawns after split, received \${nextPtyId}\`);
-  await run("sibyl.close");
-  await render();
-  if (nextPtyId !== 2) throw new Error(\`Expected surviving pane to keep its original PTY, received \${nextPtyId}\`);
-  if (terminated.join(",") !== "pty-1") throw new Error(\`Unexpected terminated PTYs: \${terminated}\`);
-} finally {
-  setup.renderer.destroy();
-  await Promise.resolve();
-}`,
-      ],
-      {
-        cwd: process.cwd(),
-        stderr: "pipe",
+        env: {
+          ...process.env,
+          SIBYL_OBSERVER_ENABLED: undefined,
+          SIBYL_SUBAGENT_ENABLED: undefined,
+          OPENCODE_SERVER_URL: undefined,
+        },
       },
     );
 
