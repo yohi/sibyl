@@ -1,217 +1,206 @@
-# Sibyl 仕様書 (SPEC.md)
+# Sibyl v2 Observer 仕様書
 
-本ドキュメントは、OpenCode プラグイン `@yohi/sibyl` の機能仕様・アーキテクチャ・動作規則を定義する仕様書です。
+本仕様書は `@yohi/sibyl/tui` の現行 Observer 契約を定義します。Observer は OpenCode TUI の既存データを読み取り、アクティブな親セッションの直接の子セッションを `sidebar_content` に表示します。
 
----
+## 1. 製品境界
 
-## 1. 概要とコンセプト
+### 1.1 目的
 
-`sibyl` は、OpenCode 環境下で動作するマルチペイン統合コンソールプラグインです。  
-外部ツールの Tmux に依存せず、**OpenTUI（Solid.js）** と **PTY (疑似端末)** を用いて単一プロセス内で動的ペイン分割・プロセス管理・TUI 描画を完結させます。
+- 現在の OpenCode セッションに属する直接の子セッションを一覧表示する。
+- EventBus の更新と初期 snapshot を同じ Registry に統合する。
+- 表示情報を安全な allowlist に限定し、機密情報を描画しない。
+- 子セッション数、活動履歴、参照数を bounded に保つ。
 
-### 主な特徴
-- **Tmux 非依存**: 外部コマンド依存を排し、Windows / macOS / Linux および Docker / CI 環境で一貫して動作。
-- **OpenCode プラグイン アーキテクチャ**: `@opencode-ai/plugin` (Server) および `@opencode-ai/plugin/tui` (TUI) の拡張 API に完全準拠。
-- **堅牢な PTY ライフサイクル**: 子孫プロセスの追跡、SIGTERM → タイムアウト → SIGKILL による段階的終了、OpenCode の `onDispose()` フックとの統合。
+### 1.2 非目標
 
-Server プラグインは `/sibyl` コマンドを登録する薄いコマンドレジストラです。実際のルート遷移と PTY の所有・終了処理は TUI プラグインが担当し、Server 側の `command.execute.before` はコマンドを横取りせずホストへ委譲します。
+Observer は次の操作を実行しません。
 
----
+- セッションの作成、編集、削除、再実行
+- Prompt、Tool、Permission の送信または変更
+- Model、Agent、Provider の変更
+- route、keymap、layout、pane の登録または操作
+- PTY、shell、外部 process の起動
+- 接続先、ディレクトリ、認証情報の解決
+- Akane のロード、設定、参照、描画
 
-## 2. システム構成・コンポーネント責務
+## 2. 構成
 
 ```text
-┌─────────────────────────────────────────────────────────┐
-│ OpenCode CLI / TUI Host                                 │
-│  ├─ opencode.json (Server Plugin: @yohi/sibyl/server)   │
-│  └─ tui.json    (TUI Plugin:    @yohi/sibyl/tui)      │
-├─────────────────────────────────────────────────────────┤
-│ Sibyl Plugin                                            │
-│  ├─ src/server.ts         : コマンドパレット定義・フック  │
-│  ├─ src/tui.tsx           : ルート登録・Keymap・Dispose │
-│  ├─ src/layout-manager.tsx: 再帰的レイアウトツリー・フォーカス │
-│  ├─ src/keymap.ts         : 分割/削除/移動の純粋ツリー操作 │
-│  ├─ src/pane.tsx          : ペインコンポーネント (Solid.js) │
-│  ├─ src/pty-output-buffer.ts : ANSIパース・境界バッファ   │
-│  ├─ src/ansi-strip.ts     : C0/CSI/OSC/DCS 等除去       │
-│  ├─ src/pane-backend.ts   : PaneBackend 抽象 I/F         │
-│  ├─ src/opentui-pane-backend.ts: OpenTUI 版 PaneBackend  │
-│  ├─ src/pty-manager.ts    : PTY プロセス管理・マルチプラットフォーム│
-│  ├─ src/subagent-lifecycle-manager.ts : イベント状態機械・退避制御 │
-│  ├─ src/subagent-pane-adapter.ts       : attach PTY 生成・ペイン管理 │
-│  ├─ src/subagent-event-source.ts       : EventBus / SSE 接続源  │
-│  ├─ src/subagent-config.ts             : 設定優先順位個別解決  │
-│  ├─ src/subagent-attach-args.ts        : コマンド引数構築・検証 │
-│  ├─ src/subagent-validation.ts         : 入力値・境界値バリデーション │
-│  └─ src/subagent-integration.ts        : サブエージェント統合配線 │
-├─────────────────────────────────────────────────────────┤
-│ PTY Adapters                                            │
-│  ├─ Bun.Terminal (Bun / POSIX)                          │
-│  └─ node-pty     (Node.js / Bun Windows フォールバック) │
-└─────────────────────────────────────────────────────────┘
+OpenCode TUI
+  └─ @yohi/sibyl/tui
+       ├─ resolveObserverConfig
+       ├─ ObserverEventSource
+       ├─ ObserverSnapshotReader
+       ├─ SubagentRegistry
+       └─ sidebar_content -> SidebarObserver -> SubagentCard
 ```
 
-### 主要コンポーネント一覧
+`src/index.ts` は server-safe な Observer core API を公開し、Solid/OpenTUI の描画配線は `./tui` エントリに限定します。
 
-| コンポーネント | 責務 |
-| :--- | :--- |
-| `PtyManager` | PTY アダプターの動的ロード、プロセス生成・入力・リサイズ・終了制御、データ/Exit イベントのリプレイとマルチサンスクリプション配送。 |
-| `PtyTerminator` | プラットフォーム別の終了処理（POSIX: SIGTERM → 1.5s 待機 → SIGKILL、Windows: `kill()`）および子孫プロセスの追跡・終了。 |
-| `PtyProcessTracker` | PTY から起動された子孫プロセスグループ PID の追跡とゾンビ化防止。 |
-| `LayoutManager` / `LayoutNode` | Solid.js による再帰的 Flexbox ペインレイアウトの描画と、アクティブペインのフォーカス管理。 |
-| `keymap.ts` | レイアウトツリー（`PaneModel`）の純粋関数操作（`splitPane`, `closePane`, `nextLeaf`, `prevLeaf`, `removeLeaf`）。 |
-| `Pane` | 1 つのペインを表示する Solid コンポーネント。キーボード入力の PTY 転送、表示用バッファの維持。 |
-| `PtyOutputBuffer` | PTY 出力ストリームのバッファリング。チャンク境界をまたぐ不完全エスケープシーケンスの保持と最大保持行数（デフォルト 1000 行）の管理。 |
-| `ansi-strip.ts` | 制御文字（C0 制御文字、DCS/SOS/PM/APC、CSI、OSC）の除去（LF・CR・TAB を除く）。 |
-| `PaneBackend` | ペイン生成・入力・リサイズの抽象インターフェース。将来の Terminal 描画方式や別バックエンドとの差し替えを可能にする。 |
-| `SubagentLifecycleManager` | サブエージェントのライフサイクル（生成・アイドル・エラー・削除）を管理し、自動ペイン開閉およびペイン数上限オーバー時の最古ペイン自動退避（Evict）を行う状態機械。 |
-| `SubagentPaneAdapter` | `SubagentPaneManager` インターフェースを実装し、`opencode attach` の PTY プロセス起動・ペイン割り当て・閉鎖を冪等に制御。 |
-| `TuiEventBusSource` / `SseEventSource` | インプロセス EventBus または OpenCode Server の SSE ストリームからサブエージェントイベントを取得・整形するイベント源。 |
-| `ConfigResolver` | 設定優先順位（環境変数 > akane > sibyl > pluginInput）に基づき、`enabled`, `maxPanes`, `serverUrl`, `directory` などの設定を項目単位でマージ解決。 |
-| `attachSubagentIntegration` | サブエージェント統合機能の初期化エントリポイント。イベント源、ライフサイクルマネージャ、ペインアダプタを配線し、終了フックを登録。 |
+## 3. Observer 設定
 
----
+### 3.1 設定型とデフォルト
 
-## 3. 入力制御とキーマップ仕様
+| 項目 | 型 | デフォルト | 範囲・形式 |
+| --- | --- | ---: | --- |
+| `enabled` | boolean | `false` | `true` / `false` |
+| `maxVisibleSubagents` | integer | `8` | `1`〜`8` |
+| `maxTrackedSubagents` | integer | `64` | `8`〜`256`、表示数以上 |
+| `activityLimit` | integer | `5` | `1`〜`20` |
+| `idleRetentionMs` | integer | `300000` | `0`〜`3600000` |
+| `showModel` | boolean | `true` | `true` / `false` |
+| `showProvider` | boolean | `true` | `true` / `false` |
+| `showLatestText` | boolean | `true` | `true` / `false` |
+| `showReasoningSummary` | boolean | `true` | `true` / `false` |
 
-### 3.1 キーバインドと命令分離
-ペイン操作系キーは `api.keymap.registerLayer()` に登録し、全 binding で **`preventDefault: true`** を明示します。
+### 3.2 解決順序
 
-```typescript
-bindings: [
-  { key: "ctrl+shift+s", cmd: "sibyl.open",             preventDefault: true },
-  { key: "ctrl+a h",     cmd: "sibyl.split.horizontal", preventDefault: true },
-  { key: "ctrl+a v",     cmd: "sibyl.split.vertical",   preventDefault: true },
-  { key: "ctrl+a n",     cmd: "sibyl.focus.next",        preventDefault: true },
-  { key: "ctrl+a p",     cmd: "sibyl.focus.prev",        preventDefault: true },
-  { key: "ctrl+a x",     cmd: "sibyl.close",             preventDefault: true },
-]
+各項目は独立して次の順で選択します。
+
+```text
+SIBYL_OBSERVER_* > pluginOptions.observer > sibyl.observer > default
 ```
 
-また、コマンドパレットから利用可能な補助コマンドとして以下が登録されます。
+環境変数は次のとおりです。
 
-| コマンド ID | 説明 |
-| :--- | :--- |
-| `sibyl.showSubagentDisplayConfig` | サブエージェント自動表示機能の起動時設定（有効状態・上限数など）を表示 |
+| 項目 | 環境変数 |
+| --- | --- |
+| `enabled` | `SIBYL_OBSERVER_ENABLED` |
+| `maxVisibleSubagents` | `SIBYL_OBSERVER_MAX_VISIBLE_SUBAGENTS` |
+| `maxTrackedSubagents` | `SIBYL_OBSERVER_MAX_TRACKED_SUBAGENTS` |
+| `activityLimit` | `SIBYL_OBSERVER_ACTIVITY_LIMIT` |
+| `idleRetentionMs` | `SIBYL_OBSERVER_IDLE_RETENTION_MS` |
+| `showModel` | `SIBYL_OBSERVER_SHOW_MODEL` |
+| `showProvider` | `SIBYL_OBSERVER_SHOW_PROVIDER` |
+| `showLatestText` | `SIBYL_OBSERVER_SHOW_LATEST_TEXT` |
+| `showReasoningSummary` | `SIBYL_OBSERVER_SHOW_REASONING_SUMMARY` |
 
-### 3.2 入力ルーティング
-フォーカス中の `Pane` コンポーネントのみが `useKeyboard` ハンドラ内でアクティブな `PtyHandle.write()` を呼び出します。操作キーが Keymap レイヤーで消費されるため、シェル入力との混線は発生しません。
+環境変数の boolean は `true`、`false`、`1`、`0` のいずれかです。integer は符号なしの 10 進整数で、範囲外・小数・不正文字列は `SubagentValidationError` とします。`maxTrackedSubagents < maxVisibleSubagents` も拒否します。
 
----
+### 3.3 旧設定
 
-## 4. レイアウトツリーとツリー縮約規則
+旧 display、connection、directory、credential、attach 設定は値を Observer 設定へ変換しません。存在を検出した場合、TUI plugin の 1 回の起動につき 1 回だけ deprecation warning を出し、すべて破棄します。
 
-1. **二分木表現**: レイアウトは内部ノード（`direction: "horizontal" | "vertical"` と `children` を持つ）と葉ノード（`ptyOptions` を持つペイン）による二分木として保持されます。
-2. **単一子 split ノードの縮約**: ペイン閉鎖（`closePane`）によって子ノードが 1 つだけになった split ノードは、その唯一の子ノードへと自動縮約（un-wrap）されます。これにより不必要な階層構造の維持を防ぎます。
-3. **全ペイン閉鎖時の保護**: 最後の 1 ペインを閉じた場合、自動的に新規のデフォルトシェルペインを再生成してルートに配置します。
+## 4. セッション境界
 
----
+- `sidebar_content` の `props.session_id` を現在の親 ID とします。
+- Session の `parentID` が親 ID と完全一致するものだけを候補にします。
+- 孫セッションや別親のセッションは表示しません。
+- 親の切り替え時は、前の親の表示を空にして新しい snapshot を読み取ります。
 
-## 5. PTY ライフサイクルとクリーンアップ
+## 5. 安全投影
 
-### 5.1 終了処理シーケンス
-- **POSIX**:
-  1. PTY プロセスおよび子孫プロセスグループへ `SIGTERM` を送信。
-  2. 1.5 秒のタイムアウトを待機。
-  3. 終了しない場合、`SIGKILL` を送信して強制終了。
-- **Windows**: `terminal.kill()` を呼び出し。
+### 5.1 Session
 
-### 5.2 クリーンアップフック統合
-- **標準フック**: OpenCode TUI プラグインの `api.lifecycle.onDispose()` にて全 PTY を一括終了（`ptyManager.terminateAll()`）。
-- **最終フォールバック**: `process.once("exit")` にて未終了 PTY に対する同期的 `SIGKILL` フォールバックを実行。
+保持する Session 情報は ID、親 ID、作成時刻、更新時刻だけです。
 
----
+### 5.2 Message
 
-## 6. マルチプラットフォーム & ランタイム仕様
+保持する Message 情報は ID、Session ID、role、作成時刻、Assistant の完了時刻と error 有無、User Message の Agent 名、User または Assistant の Provider/Model 候補だけです。
 
-| 環境 | PTY アダプター | 備考 |
-| :--- | :--- | :--- |
-| **Bun (POSIX)** | `Bun.Terminal` (内蔵) | ネイティブ addon なしで高速動作 |
-| **Bun (Windows)** | `node-pty` / 外部 PTY | 動的インポート / 外部フォールバック |
-| **Node.js (All OS)** | `node-pty` | optionalDependency として動的インポート |
+### 5.3 Part
 
-### 6.1 受入対象
+allowlist は次の種類です。
 
-`tmux` がインストールされていない環境で、マルチペイン表示、PTY の起動、入力転送、終了処理を検証します。最低限、次の組み合わせを受入対象とします。
+- `agent`: 安全な Agent 名
+- `subtask`: 安全な Agent 名
+- `text`: Assistant のテキストのみ
+- `reasoning`: `summaryVisibility === "public"` の公開 summary のみ
+- `tool`: 安全な Tool 名と状態、更新時刻
 
-- Windows: PowerShell および cmd の既定 shell
-- macOS: zsh の既定 shell
-- Linux: bash の既定 shell
-- 軽量 Docker イメージ
-- Node.js ランタイムおよび Bun ランタイム
-- GitHub Actions の `ubuntu-latest`、`macos-latest`、`windows-latest`
+Tool payload、Tool output、Tool error、Tool title、添付、metadata は読まず、投影結果にも含めません。
 
-`node-pty` のネイティブ addon は、対象 OS と対象ランタイムでビルドおよび動作を確認します。
+### 5.4 Redaction と識別子
 
-### 6.2 性能受入条件
+テキストは redaction を先に行い、その後で長さ制限を適用します。認証 scheme、名前付き secret、既知の token 形式、機密環境変数 assignment は `[redacted]` に置換します。
 
-PTY の `onData` 発火から OpenTUI の表示バッファ（`TextRenderable.content`）への反映は、非ゲートの目標として 1 フレーム（約 16ms）以内に完了させます。実運用上の受入基準は、スクロールを含む負荷で 100Hz の出力を1000サンプル以上測定し、次を満たすことです。
+ID と表示名には最大長と英数字を中心とする syntax check を適用します。無効な値を投影できない場合は、その Session、Message、Part を破棄します。無効な Tool 名だけは `unknown` に置換します。
 
-- p95 が 50ms 以下
-- p99 が 110ms 以下
+## 6. Event と snapshot
 
-### 6.3 ペインサイズ制限
+### 6.1 Event source
 
-OpenTUI Solid は現時点でペイン単位のサイズ API を提供していないため、各 `Pane` は `useTerminalDimensions()` から取得した端末全体の `cols`/`rows` を PTY リサイズに使用します。分割ペインも同一の端末サイズを共有し、ペイン単位で独立したサイズ計算・設定は行いません。将来的に OpenTUI がペイン単位サイズ API を提供した際に、個別サイズへの移行を検討します。
+`TuiEventBusSource` は host の EventBus を購読します。`SseEventSource` は host が提供する既存 transport を使う差し替え可能な source です。どちらも接続先や認証情報を受け取りません。
 
-## 7. クリーンアップ責務
+イベントは次の状態へ正規化します。
 
-- TUI プラグインの `api.lifecycle.onDispose()` を標準経路とし、`ptyManager.terminateAll()` で起動中の全 PTY を終了します。
-- Server プラグインは PTY を所有しないため、Server 側に個別の PTY クリーンアップ処理はありません。
-- `process.once("exit")` は、通常の非同期終了経路ではなく、未終了 PTY に対する同期的な最終 `SIGKILL` フォールバックとしてのみ使用します。
+- Session 作成、更新、idle、error、削除
+- Message 更新
+- Part 更新
 
----
+不正なイベントは無視または sanitized error として扱い、TUI をクラッシュさせません。
 
-## 8. 移行・将来拡張ロードマップ
+### 6.2 Snapshot
 
-1. **フェーズ1：PTY プロトタイプ**: 単一 PTY の出力を `ScrollBox` に表示する。
-2. **フェーズ2：入力ルーティング**: フォーカス中の PTY へキーボード入力を転送する。
-3. **フェーズ3：レイアウト・バックエンド抽象化**: `PaneBackend` を介して OpenTUI 仮想ペインと外部アダプターを差し替え可能にする。
+起動時、親変更時、再接続時に次を行います。
 
-### 8.1 描画方式
+1. 親の直接の子 Session を取得する。
+2. status を `busy`、`idle`、`retry`、`error`、`unknown` に正規化する。
+3. 最大 32 件の Message と最大 64 件の Part 参照を安全投影する。
+4. 最大 8 並列で選択済み子 Session を hydrate する。
+5. snapshot 後に到着したイベントを source order で適用する。
 
-1. **最小限方式 (現在の実装)**: PTY 出力を ANSI strip および制御文字除去の上、`TextRenderable` + `ScrollBox` にて描画。
-2. **ANSI 解釈方式 (フェーズ 2)**: `xterm-headless` 等により仮想画面状態を計算し、SGR 色指定やカーソル位置を TUI 上に再構成。
-3. **セルマトリクス方式 (フェーズ 3)**: OpenTUI ネイティブ Zig レイヤーに直接セル状態を書き込む専用 `TerminalPane` renderable の開発。
+Snapshot の対象外になった子は `omittedCount` または bounded overflow counter に反映します。
 
----
+## 7. Registry と表示
 
-## 9. サブエージェント自動ペイン連携 (Subagent Integration)
+`SubagentRegistry` は親 ID、hydrated child、pending correlation、activity history、message/part reference、resync を所有します。
 
-### 9.1 概要と目的
-`oh-my-openagent` などの OpenCode プラグインが生成するサブエージェントセッションを、Tmux などの外部ツールに依存せず、Sibyl の OpenTUI 仮想ペイン内に自動表示・統合管理する機能です。`opencode attach <serverUrl> --session <id> --dir <directory> --mini` を非同プロセスの PTY としてペイン内で実行することで、スムーズな並列エージェントの可視化を実現します。
+- `maxTrackedSubagents` を超える候補は無制限に保持しません。
+- `maxVisibleSubagents` 件だけをカードとして表示します。
+- `activityLimit` を超える履歴は保持しません。
+- `idleRetentionMs` が経過した idle child は破棄対象です。
+- delete は即時に反映します。
+- active entry は capacity 超過時に自動削除しません。
+- イベント burst は coalesce して購読者を通知します。
+- Registry snapshot は Solid subscriber が読み取る immutable view です。
 
-### 9.2 サブエージェント自動表示 (FR-1)
-- **自動検出**: `session.created` イベントにて `parentID`（親セッション ID）を持つ子セッションを検出した際、自動的に新しい OpenTUI 水平分割ペインを作成し、`opencode attach` を実行します。
-- **コマンド構成**: `opencode attach <serverUrl> --session <id> --dir <directory> --mini`（Windows 環境では `opencode.cmd` を自動選択）。引数順序は `<serverUrl>` を必須 positional 引数として先頭に指定します。
-- **非シェル spawn**: シェルを介さない配列渡しスパウン（`shell: false` 相当）で実行し、コマンドインジェクションを構造的に排除します。
+`SubagentCard` は Agent 名と status を必ず表示し、設定に応じて Model、Provider、最新 Assistant テキスト、公開 reasoning summary、Tool activity を表示します。状態色は host theme の `error`、`warning`、`info`、`success`、`textMuted` を使います。
 
-### 9.3 ペイン数管理と自動退避 (FR-2)
-- **表示上限数 (`maxPanes`)**: デフォルトは `4`（設定可能範囲: `1`〜`8` の整数）。
-- **上限超過時の退避 (Eviction)**: 表示数が上限に達した状態で新たなサブエージェントが生成された場合、最も古い（`info.time.created` が最も早い）ペインを自動的に閉じた上で新規ペインを作成します。
-- **特例値 (`0`)**: `maxPanes` に `0` が設定された場合、機能を無効とみなし、起動時に既存のサブエージェントペインをすべて閉じて以降の新規作成を行いません。
-- **無効値の拒否**: 負数・小数・`NaN`・非整数値は設定解決時にバリデーションエラーとして拒否し、黙殺やデフォルトフォールバックを行いません。
+## 8. TUI API と cleanup
 
-### 9.4 自動クリーンアップ (FR-3)
-- **ライフサイクルイベント追跡**:
-  - `session.idle`: 対象セッションのペインを即座に閉じます。
-  - `session.error`: `sessionID` が特定できる場合はペインを閉じます。`sessionID` 不明の場合はペインを閉じずエラー内容のみログに記録します。
-  - `session.deleted`: ペインが残っている場合はクリーンアップします。
-- **冪等性**: 重複イベントや削除済みセッションに対するclose処理は安全に無視されます。
+`attachSubagentIntegration` は次の host capability だけを使用します。
 
-### 9.5 イベント購読・状態再同期 (FR-4)
-- **イベント源**: インプロセスの `api.event` バス（`TuiEventBusSource`）または OpenCode Server API の SSE ストリーム（`SseEventSource`）。
-- **再同期 (Resync)**: 起動時および SSE 再接続時に `session.list` API によりアクティブセッション一覧を pull し、管理状態（開いているペイン集合）を自動再同期します。サーバ上に存在しない orphan ペインは閉鎖し、未管理の子セッションは自動生成します。
-- **TUI 終了時クリーンアップ**: TUI 終了時には SSE 購読を解除し、`opencode attach` PTY プロセスを一括終了して残留プロセスを防ぎます。
+- `client.session`
+- `event`
+- `state.session`
+- `state.part`
+- `slots.register`
+- `theme`
+- `lifecycle`
 
-### 9.6 設定解決ルールと優先順位 (FR-6)
-- **優先度**: `環境変数 > akane 設定 > sibyl 設定 > pluginInput`
-- **項目単位の個別マージ**: ブロック単位の全体置換ではなく、`enabled`, `maxPanes`, `serverUrl`, `directory` などの各フィールド独立で最も優先度の高いソースの定義値を採用します。上位ソースで未定義の項目のみ下位ソースが適用されます。
+有効時に登録する slot は `sidebar_content` の 1 個だけです。`api.lifecycle.onDispose()` には Registry の `stop()` を登録し、source、resync、購読者を冪等に解放します。無効時は source、snapshot reader、Registry、slot を生成しません。
 
-### 9.7 セキュリティ・入力検証 (FR-5)
-- **URL / セッション ID 検証**: `serverUrl` は `http://` / `https://` スキームのみ許可し、`sessionID` は英数字およびハイフンパターン（`/^[A-Za-z0-9-]+$/`）で検証。不適格値は起動前に拒否されます。
-- **資格情報秘匿**: `OPENCODE_SERVER_PASSWORD` 設定時、認証情報は子プロセスの環境変数（`OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`）経由で伝播させ、コマンドライン引数（`-u` / `-p`）やログ出力には一切含めません。ログ内のセッション ID は先頭4文字以降をマスク処理します。
+## 9. 公開 API と package surface
 
-### 9.8 非機能要件 (堅牢性・パフォーマンス)
-- **堅牢性**: `opencode attach` や SSE 接続が失敗してもプラグイン本体はクラッシュせず、エラーをログに記録します（認証情報は除く）。
-- **パフォーマンス**: 同時に複数のサブエージェントが起動しても、ペイン分割・削除が迅速に行われ、UI の応答性を損ないません。
+root entry は設定、validation、redaction、normalizer、event source、snapshot reader、Registry、generic library core を公開します。UI の `attachSubagentIntegration`、`createTuiPlugin`、default TUI module は `@yohi/sibyl/tui` から公開します。
+
+Observer v2 には独立した Server entry はありません。
+
+## 10. セキュリティ要件
+
+- raw SDK response と raw event payload を Registry に保存しません。
+- raw reasoning、Tool payload/output/error/title、attachments、metadata、credentials、environment values を投影・表示しません。
+- ログは static operation identifier と sanitized error category に限定します。
+- redaction 前の文字列を truncate しません。
+- 認証情報や API key を command line、ログ、TUI frame に出しません。
+
+## 11. 受け入れ基準
+
+- Observer が無効な場合、TUI 起動は source、Registry、slot を生成しません。
+- Observer が有効な場合、登録されるのは `sidebar_content` だけです。
+- 直接の子 1 件、複数件、最大表示数超過、idle retention、削除、親変更を正しく扱います。
+- 初期 hydrate 中の event と再同期中の event を失わずに適用します。
+- Agent、Subtask、Assistant text、公開 reasoning summary、Tool transition を正しく表示します。
+- malformed event がクラッシュや raw payload の表示を起こしません。
+- TUI bundle に route、keymap、PTY、shell、attach の実行経路が含まれません。
+- 旧設定は警告だけを出し、Observer の設定や挙動を変更しません。
+- `bun run lint`、`bun run typecheck`、`bun run test`、`bun run build` が成功します。
+
+## 12. v1 historical context
+
+v1 は PTY を利用したマルチペイン統合コンソールを試験した世代でした。v2 Observer はその実行経路を製品の現行 TUI 契約から外し、読み取り専用の sidebar data flow に置き換えています。リリース上の移行記録は [CHANGELOG.md](./CHANGELOG.md) を参照してください。
+
+## 13. 将来検討
+
+Akane などの外部設定・表示システムとの連携は、現行 Observer の境界外です。再導入する場合は、設定の所有権、データ allowlist、secret handling、ライフサイクルを別仕様として定義し、既存の Observer core に暗黙依存させません。

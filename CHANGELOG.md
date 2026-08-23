@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+* TUI のサブエージェント表示を、PTY や外部プロセスを使わない `sidebar_content` Observer へ移行しました。
+* Server entry と旧サブエージェント attach 経路を削除しました。利用時は `@yohi/sibyl/tui` だけを登録してください。
+
+### Security
+
+* Session、Message、Part、Tool の安全な allowlist 投影と redaction-before-truncation を追加し、raw payload、credentials、環境値を Registry と表示から除外しました。
+
 ## [1.1.0](https://github.com/yohi/sibyl/compare/v1.0.0...v1.1.0) (2026-08-10)
 
 
