@@ -82,8 +82,9 @@ Observer が保持・表示するのは安全投影済みの次の情報だけ�
 - 最新の Assistant テキスト
 - 公開設定された reasoning summary
 - 現在および最近の Tool 名と状態（`pending`、`running`、`completed`、`error`）
+カードは状態の緊急度（`error` > `retry` > `busy` > `idle` > `unknown`）、同順位は最近の活動が新しい順に並びます。現在の活動は `running` を最優先し、次に `pending` を選択します。完了・失敗した Tool は `activityLimit` 件までの履歴にだけ残ります。
 
-表示テキストは機密情報を置換してから長さ制限を適用します。置換文字列は常に `[redacted]` です。生の reasoning、Tool の入力・出力・エラー・タイトル、添付ファイル、メタデータ、環境変数、認証情報、API キーは投影・保存・描画しません。
+表示テキストは機密情報を置換してから長さ制限を適用します。置換文字列は常に `[redacted]` で、名前付き secret → 認証 scheme → 既知 token 形式 → 機密環境変数代入 → 切り詰め の固定順序で決定論的に適用します。既定上限は最新テキストと reasoning summary が 160 文字、識別子と Tool 名が 64 文字、相関 ID が 128 文字です。生の reasoning、Tool の入力・出力・エラー・タイトル、添付ファイル、メタデータ、環境変数、認証情報、API キーは投影・保存・描画しません。
 
 セッション ID、メッセージ ID、Part ID、Agent 名、Provider 名、Model 名、Tool 名は長さと文字種を検証し、安全な値だけを保持します。無効な Tool 名は `unknown` として扱われます。
 

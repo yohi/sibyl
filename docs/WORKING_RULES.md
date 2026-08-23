@@ -17,10 +17,11 @@ This document expands on the non-negotiable conventions referenced from [AGENTS.
 - Any behavior change must be covered by tests in `tests/`.
 - Run `bun run lint`, `bun run typecheck`, and `bun run test`, and ensure all checks pass before considering a change complete.
 
-## PTY Lifecycle
+## Cleanup Ownership
 
-- Every spawned PTY must have a guaranteed cleanup path.
-- Use `PtyTerminator` / `PtyManager` and wire disposal through OpenCode `onDispose` hooks.
+- The Observer owns no processes. Registry stop must abort reads and refreshes, clear retention timers, unsubscribe handlers, and stop the event source idempotently.
+- Inside the legacy generic PTY modules, every spawned PTY keeps a guaranteed cleanup path through `PtyTerminator` / `PtyManager`.
+- Wire disposal through OpenCode `onDispose` hooks.
 
 ## Git Workflow
 
