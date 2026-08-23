@@ -1,12 +1,16 @@
 # AGENTS.md — Sibyl
 
-Sibyl is an OpenCode multi-pane integrated console plugin that replaces Tmux with OpenTUI + PTY for dynamic pane splitting and process control inside a single terminal.
+Sibyl gives operators a read-only, secret-safe overview of the active OpenCode
+session's direct child agent sessions inside the `sidebar_content` slot. It does
+not create sessions, send prompts, manage models, register routes or keymaps, or
+spawn PTYs, shells, or attach processes.
 
 ## Stack
 
-- **Bun** is the package manager and test runner (never npm/pnpm/yarn).
+- **Bun** is the package manager and test runner (do not use npm/pnpm/yarn).
 - TypeScript (strict), Solid.js + OpenTUI, Rollup + tsc build, Biome lint/format.
-- PTY: Bun built-in `Bun.Terminal` on POSIX; `node-pty` optional elsewhere.
+- Generic PTY modules remain exported for public-API compatibility; the Observer
+  path never imports or constructs them.
 
 ## Verify before finishing any change
 
@@ -14,16 +18,19 @@ Sibyl is an OpenCode multi-pane integrated console plugin that replaces Tmux wit
 bun run lint
 bun run typecheck
 bun run test
+bun run build
 ```
 
-## Working rules
+## Progressive disclosure
 
-See [docs/WORKING_RULES.md](./docs/WORKING_RULES.md) for the full conventions. The short version: let Biome enforce style, never suppress type errors, cover behavior changes with tests, guarantee PTY cleanup, and use Japanese Conventional Commits.
+This file stays small. Start with the most relevant doc below; detailed
+conventions and implementation rules live in those files, not here.
 
-## Read-Map (progressive disclosure)
+- `SPEC.md` — observer contract: configuration, safety projection, redaction,
+  event handling, registry bounds, cleanup, acceptance criteria.
+- `docs/architecture.md` — data flow, component responsibilities,
+  bounded-state contract, current limitations.
+- `docs/WORKING_RULES.md` — coding, testing, cleanup, and Git conventions.
+- `CHANGELOG.md` — release history and migration context.
 
-- `SPEC.md` — formal spec and current source of truth: keymaps, PTY lifecycle, cleanup ownership, acceptance criteria, roadmap.
-- `REQUIREMENTS.md` — original requirements and rationale.
-- `docs/architecture.md` — component structure and known limitations (e.g., per-pane PTY sizing).
-- `docs/WORKING_RULES.md` — coding, testing, and Git conventions.
-- `CHANGELOG.md` — release history; check before assuming a behavior is a bug.
+Let Biome enforce style and formatting. Do not ask the agent to act as a linter.

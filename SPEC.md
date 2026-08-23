@@ -105,16 +105,30 @@ allowlist は次の種類です。
 - `agent`: 安全な Agent 名
 - `subtask`: 安全な Agent 名
 - `text`: Assistant のテキストのみ
-- `reasoning`: `summaryVisibility === "public"` の公開 summary のみ
+- `reasoning`: top-level の `summaryVisibility === "public"` と string の `publicSummary` がともにある公開 summary のみ。生の `ReasoningPart.text` や metadata から summary を探索しない
 - `tool`: 安全な Tool 名と状態、更新時刻
 
 Tool payload、Tool output、Tool error、Tool title、添付、metadata は読まず、投影結果にも含めません。
 
+Tool 活動は part の `id` で識別し、`id` を持たない未知の payload に限り `callID` へフォールバックします。同一 ID の活動は `pending` → `running` → `completed`/`error` の状態遷移を上書き更新し、重複する履歴項目を追加しません。
+
 ### 5.4 Redaction と識別子
 
-テキストは redaction を先に行い、その後で長さ制限を適用します。認証 scheme、名前付き secret、既知の token 形式、機密環境変数 assignment は `[redacted]` に置換します。
+テキストは redaction を先に行い、その後で長さ制限を適用します。置換値は常にリテラル `[redacted]` で、次の固定順序で決定論的に適用します。
+
+1. `authorization`、`password`、`secret`、`token`、`api_key`、`apikey`(大小文字非依存)のフィールド名や代入に続く値
+2. `Basic`、`Bearer` 等の認証 scheme に続く資格情報
+3. 既知の API key・access token リテラル
+4. 機密環境変数代入(名前と値の組)
+5. 長さ制限の適用
+
+既定上限は最新 Assistant テキストと公開 reasoning summary が 160 文字、表示識別子と Tool 名が 64 文字、相関 ID が 128 文字です。
 
 ID と表示名には最大長と英数字を中心とする syntax check を適用します。無効な値を投影できない場合は、その Session、Message、Part を破棄します。無効な Tool 名だけは `unknown` に置換します。
+
+### 5.5 Agent 名と Model の解決
+
+Agent 名は最新の AgentPart 名、次に Subtask agent、最後に UserMessage agent の優先順で解決し、すべて無効な場合は `unknown` とします。Model は最新の Assistant Message の provider/model を優先し、無効な場合は User Message の model 選択へフォールバックします。解決できない provider/model は表示から省略します。
 
 ## 6. Event と snapshot
 
@@ -122,11 +136,18 @@ ID と表示名には最大長と英数字を中心とする syntax check を適
 
 `TuiEventBusSource` は host の EventBus を購読します。`SseEventSource` は host が提供する既存 transport を使う差し替え可能な source です。どちらも接続先や認証情報を受け取りません。
 
-イベントは次の状態へ正規化します。
+両 source は次の OpenCode イベントを同じ正規化契約で処理します。
 
-- Session 作成、更新、idle、error、削除
-- Message 更新
-- Part 更新
+| OpenCode イベント | 相関キーと正規化効果 |
+| --- | --- |
+| `session.created` / `session.updated` | `properties.info.id` と `properties.info.parentID`。直接の子を upsert または再スコープ |
+| `session.deleted` | `properties.sessionID`。子と保持データを削除 |
+| `message.updated` / `message.removed` | `properties.sessionID` と `properties.info.id` または `properties.messageID`。Message 由来フィールドを更新または除去 |
+| `message.part.updated` / `message.part.removed` | `properties.sessionID`、part の `messageID`、part の `id` または `properties.partID`。Part 由来フィールドを更新または除去 |
+| `session.status` / `session.idle` / `session.error` | `properties.sessionID`。runtime status と retention 処理へ正規化 |
+| `session.next.retried` | `properties.sessionID` と `attempt`。後続の status/idle/error/削除イベントが上書きするまで `retry` を維持 |
+
+Event stream を子の作成、idle、error、削除のみへ縮小してはなりません。Assistant テキストは Assistant Message と相関した text part からのみ派生し、Tool 活動は part の `id`(`callID` フォールバック)で相関します。
 
 不正なイベントは無視または sanitized error として扱い、TUI をクラッシュさせません。
 
@@ -141,6 +162,18 @@ ID と表示名には最大長と英数字を中心とする syntax check を適
 5. snapshot 後に到着したイベントを source order で適用する。
 
 Snapshot の対象外になった子は `omittedCount` に反映します。`omittedCount` は、親に属する安全な直接の子候補のうち、snapshot reader の追跡容量に入らなかった件数です。削除済みとして tombstone で無視した ID や親が一致しない Session は候補数にも含めません。
+
+### 6.3 初期化と再同期の競合解消
+
+親を選択するときは、snapshot を読み取る前に event source を購読します。読み取り中に到着した正規化イベントは bounded にバッファし、snapshot の適用後に source order で再生します。reconciliation が完了するまで Registry を ready にせず、Sidebar は child card を描画しません。
+
+再同期では、読み取り開始時点の最終 sequence を watermark とし、読み取り中のイベントをバッファします。新しい snapshot を適用した後、watermark より後のイベントを source order で適用します。親の切り替え、停止、または後続の読み取りによって stale になった読み取り結果は破棄します。
+
+### 6.4 Snapshot failure isolation
+
+abort 以外で初期 snapshot が失敗した場合、Registry は buffered event を再生して ready 状態へ移行し、sanitized failure を記録しつつ event source を維持します。永久に loading 表示のままにしてはなりません。
+
+abort 以外で resync が失敗した場合、既存の tracked view を破棄せず、watermark より後の buffered event を適用して event source を維持します。失敗した読み取りが別の親や新しい読み取り結果を上書きしてはなりません。
 
 ## 7. Registry と表示
 
@@ -166,13 +199,15 @@ capacity 超過を表す `overflowCount` は、bounded な aggregate indicator �
 容量が解放されたとき、または次の snapshot/resync が成功したときに再追跡を試みます。新しい `session.upsert` は空きがある場合、または期限切れの idle entry を退避できる場合に admission されます。snapshot/resync では、候補を urgency、更新時刻、ID の順で再選択します。削除、idle retention expiry、source reconnect は resync を要求します。tombstone が残る削除済み ID は stale snapshot から再登録せず、後続の成功した snapshot で tombstone の扱いが確定するまで除外します。
 
 - `maxVisibleSubagents` 件だけをカードとして表示します。
+- カードは緊急度 `error` > `retry` > `busy` > `idle` > `unknown`、同順位は直近の活動が新しい順に並べます。
 - `activityLimit` を超える履歴は保持しません。
 - `idleRetentionMs` が経過した idle child は破棄対象です。
 - delete は即時に反映します。
-- イベント burst は coalesce して購読者を通知します。
+- イベント burst は UI 更新前に child session と tool identity 単位で coalesce し、OpenCode イベント発生から 250 ms 以内の描画を目標とします。
 - Registry snapshot は Solid subscriber が読み取る immutable view です。
 
 `SubagentCard` は Agent 名と status を必ず表示し、設定に応じて Model、Provider、最新 Assistant テキスト、公開 reasoning summary、Tool activity を表示します。状態色は host theme の `error`、`warning`、`info`、`success`、`textMuted` を使います。
+現在の活動は `running` を最優先し、次いで `pending` を選択します。完了・失敗した Tool は `activityLimit` 件までの bounded 履歴にだけ残ります。
 
 ## 8. TUI API と cleanup
 
@@ -220,4 +255,4 @@ v1 は PTY を利用したマルチペイン統合コンソールを試験した
 
 ## 13. 将来検討
 
-Akane などの外部設定・表示システムとの連携は、現行 Observer の境界外です。再導入する場合は、設定の所有権、データ allowlist、secret handling、ライフサイクルを別仕様として定義し、既存の Observer core に暗黙依存させません。
+Akane などの外部設定・表示システムとの連携は、現行 Observer の境界外です。Akane との統合は、Akane が版号付きの互換公開統合 API を公開した後でのみ開始します。その段階では既存 runtime view を補強する optional health adapter を追加するにとどめ、watchdog や recovery の挙動を Sibyl 側へ移しません。再導入する場合は、設定の所有権、データ allowlist、secret handling、ライフサイクルを別仕様として定義し、既存の Observer core に暗黙依存させません。
