@@ -20,6 +20,16 @@
 * Observerのイベント処理とペイン比率を修正 ([bf8da2d](https://github.com/yohi/sibyl/commit/bf8da2d5e4e4edf7780fe5e6f71fa03b63f88bca))
 * スナップショットIDの並び順を安定化 ([b988fe5](https://github.com/yohi/sibyl/commit/b988fe5113446bf0e4204476f0719fd69d94f0af))
 * 公開API変更に合わせてメジャーバージョンを更新 ([2a77433](https://github.com/yohi/sibyl/commit/2a774337e995668c614b2577dbb41bf4ac7552c9))
+## Unreleased
+
+### Breaking Changes
+
+* TUI のサブエージェント表示を、PTY や外部プロセスを使わない `sidebar_content` Observer へ移行しました。
+* Server entry と旧サブエージェント attach 経路を削除しました。利用時は `@yohi/sibyl/tui` だけを登録してください。
+
+### Security
+
+* Session、Message、Part、Tool の安全な allowlist 投影と redaction-before-truncation を追加し、raw payload、credentials、環境値を Registry と表示から除外しました。
 
 ## [1.1.0](https://github.com/yohi/sibyl/compare/v1.0.0...v1.1.0) (2026-08-10)
 

@@ -1,42 +1,12 @@
-# 🧠 sibyl
+# Sibyl v2 Observer
 
-**OpenCode Multi-Pane Integrated Console Plugin**
+Sibyl は OpenCode TUI の `sidebar_content` に、現在の親セッションから直接生成された子セッションを表示する読み取り専用 Observer プラグインです。
 
-> 「並列化された思考を統合し、全プロセスの秩序を統制する。」
+Observer はデフォルトで無効です。有効化しても、セッションの作成・編集・削除、プロンプト送信、権限変更、モデル変更、PTY 起動、シェル起動は行いません。
 
-`sibyl` は、[OpenCode](https://github.com/anomalyco/opencode) 環境下で稼働する複数のエージェントプロセスを一元管理し、**Tmuxなどの外部ツールを一切使うことなく**、単一のターミナル内で動的な画面分割とPTY（疑似端末）制御を完結させるマルチペイン統合コンソールプラグインです。
+## インストール
 
-Solid.js + OpenTUI による高速な Flexbox レイアウト制御と PTY アダプター（`node-pty` および Bun 内蔵 POSIX PTY）による非同期プロセス管理により、スムーズなマルチペイン操作環境を提供します。
-
----
-
-## ⚡ Keybindings & Commands
-
-OpenCode TUI 内で以下のショートカットキーおよびコマンドパレットを利用してペインを操作できます。
-
-| キーバインド | コマンド ID | 説明 |
-| :--- | :--- | :--- |
-| `ctrl+shift+s` | `sibyl.open` | Sibyl マルチペインコンソールを開く |
-| `ctrl+a h` | `sibyl.split.horizontal` | フォーカス中のペインを横分割（左右） |
-| `ctrl+a v` | `sibyl.split.vertical` | フォーカス中のペインを縦分割（上下） |
-| `ctrl+a n` | `sibyl.focus.next` | 次のペインへフォーカス移動 |
-| `ctrl+a p` | `sibyl.focus.prev` | 前のペインへフォーカス移動 |
-| `ctrl+a x` | `sibyl.close` | フォーカス中のペインを閉じる |
-| *(パレットのみ)* | `sibyl.showSubagentDisplayConfig` | 有効化されている場合に、サブエージェント自動表示の設定状態（`enabled` と `maxPanes`）を表示 |
-
----
-
-## 📦 Installation
-
-`opencode.json` (Server plugin):
-
-```json
-{
-  "plugin": ["@yohi/sibyl/server"]
-}
-```
-
-`tui.json` (TUI plugin):
+TUI プラグインだけを登録します。
 
 ```json
 {
@@ -44,58 +14,97 @@ OpenCode TUI 内で以下のショートカットキーおよびコマンドパ�
 }
 ```
 
----
+旧 Server プラグインや互換ルートの登録は不要です。
 
-## 🤖 Subagent Display Integration
+## Observer 設定
 
-`oh-my-openagent` などのプラグインが起動するサブエージェントセッションを検知し、Sibyl 内に自動ペインとして表示・管理できます（Tmux 不要）。
-
-### 設定項目（`opencode.json` / `tui.json`）
+ホスト設定では `sibyl.observer` に設定します。プラグインオプションを使う場合は `observer` オブジェクトを渡します。
 
 ```jsonc
 {
   "sibyl": {
-    "subagentDisplay": {
-      "enabled": true,   // サブエージェント自動表示の有効化（デフォルト: false）
-      "maxPanes": 4      // 表示ペインの上限数（1〜8、0 で自動閉鎖し無効化）
+    "observer": {
+      "enabled": false,
+      "maxVisibleSubagents": 8,
+      "maxTrackedSubagents": 64,
+      "activityLimit": 5,
+      "idleRetentionMs": 300000,
+      "showModel": true,
+      "showProvider": true,
+      "showLatestText": true,
+      "showReasoningSummary": true
     }
   }
 }
 ```
 
-### 環境変数によるオーバーライド
+| 項目 | デフォルト | 有効範囲 |
+| --- | ---: | --- |
+| `enabled` | `false` | `true` / `false` |
+| `maxVisibleSubagents` | `8` | `1`〜`8` |
+| `maxTrackedSubagents` | `64` | `8`〜`256`。表示数以上 |
+| `activityLimit` | `5` | `1`〜`20` |
+| `idleRetentionMs` | `300000` | `0`〜`3600000` |
+| `showModel` | `true` | `true` / `false` |
+| `showProvider` | `true` | `true` / `false` |
+| `showLatestText` | `true` | `true` / `false` |
+| `showReasoningSummary` | `true` | `true` / `false` |
 
-`enabled` と `maxPanes` は `環境変数 > pluginOptions > akane 設定 > sibyl 設定` の優先順位で解決されます。接続設定（`serverUrl` と `directory`）は `環境変数 > pluginOptions > akane 設定 > sibyl 設定 > pluginInput` の優先順位で解決されます。
+値は項目ごとに次の順で解決されます。
 
-- `SIBYL_SUBAGENT_ENABLED`: `true` / `false`（または `1` / `0`）
-- `SIBYL_SUBAGENT_MAX_PANES`: 最大表示ペイン数（`1`〜`8`、`0` で無効化）
-- `OPENCODE_SERVER_URL`: OpenCode サーバー URL（例: `http://localhost:4096`）
-- `OPENCODE_PROJECT_DIR`: 対象プロジェクトのルートディレクトリパス
-- `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD`: サーバー認証情報（引数やログには露出せず環境変数で安全に伝播）
-
----
-
-## 🛠 Development
-
-```bash
-# 依存関係のインストール
-bun install
-
-# ビルド
-bun run build
-
-# テスト実行
-bun run test
-
-# Biome コードチェック
-bun run lint
-
-# TypeScript 型チェック
-bun run typecheck
+```text
+環境変数 > TUI pluginOptions.observer > sibyl.observer > デフォルト値
 ```
 
----
+環境変数は次の 9 個です。
 
-## 📄 Specification & Architecture
+| 項目 | 環境変数 |
+| --- | --- |
+| `enabled` | `SIBYL_OBSERVER_ENABLED` |
+| `maxVisibleSubagents` | `SIBYL_OBSERVER_MAX_VISIBLE_SUBAGENTS` |
+| `maxTrackedSubagents` | `SIBYL_OBSERVER_MAX_TRACKED_SUBAGENTS` |
+| `activityLimit` | `SIBYL_OBSERVER_ACTIVITY_LIMIT` |
+| `idleRetentionMs` | `SIBYL_OBSERVER_IDLE_RETENTION_MS` |
+| `showModel` | `SIBYL_OBSERVER_SHOW_MODEL` |
+| `showProvider` | `SIBYL_OBSERVER_SHOW_PROVIDER` |
+| `showLatestText` | `SIBYL_OBSERVER_SHOW_LATEST_TEXT` |
+| `showReasoningSummary` | `SIBYL_OBSERVER_SHOW_REASONING_SUMMARY` |
 
-技術仕様および詳細なアーキテクチャについては [SPEC.md](./SPEC.md) および [docs/architecture.md](./docs/architecture.md) を参照してください。
+環境変数の真偽値は `true` / `false` または `1` / `0`、整数値は 10 進整数です。選択された値が不正な場合、下位の設定へフォールバックせず起動を拒否します。
+
+## 表示内容とプライバシー
+
+Observer が保持・表示するのは安全投影済みの次の情報だけです。
+
+- 直接の子セッションの安全な ID、親 ID、作成時刻、更新時刻
+- 状態（`busy`、`idle`、`retry`、`error`、`unknown`）
+- Agent 名、Provider 名、Model 名
+- 最新の Assistant テキスト
+- 公開設定された reasoning summary
+- 現在および最近の Tool 名と状態（`pending`、`running`、`completed`、`error`）
+
+表示テキストは機密情報を置換してから長さ制限を適用します。置換文字列は常に `[redacted]` です。生の reasoning、Tool の入力・出力・エラー・タイトル、添付ファイル、メタデータ、環境変数、認証情報、API キーは投影・保存・描画しません。
+
+セッション ID、メッセージ ID、Part ID、Agent 名、Provider 名、Model 名、Tool 名は長さと文字種を検証し、安全な値だけを保持します。無効な Tool 名は `unknown` として扱われます。
+
+## Observer の境界
+
+- 現在 `sidebar_content` に渡された `session_id` と `parentID` が完全一致する子だけを追跡します。
+- 孫セッションを再帰的に追跡しません。
+- 表示順と状態は `SubagentRegistry` が管理します。
+- Observer は OpenCode の EventBus と既存の client/state API を読み取るだけです。
+- Sibyl の route、keymap、layout controller、pane backend、PTY、shell、attach process は Observer 経路にありません。
+- 旧設定値を検出した場合は起動ごとに 1 回だけ警告し、Observer 設定には取り込みません。
+- Akane はロード、設定、参照、描画しません。
+
+## 開発
+
+```bash
+bun install
+bun run lint
+bun run typecheck
+bun run test
+bun run build
+```
+
+詳細な契約は [SPEC.md](./SPEC.md)、実装構造は [docs/architecture.md](./docs/architecture.md)、移行履歴は [CHANGELOG.md](./CHANGELOG.md) を参照してください。
