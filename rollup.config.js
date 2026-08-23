@@ -12,12 +12,6 @@ export default [
     plugins: [nodeResolve({ extensions }), babel({ extensions, babelHelpers: "bundled" })],
   },
   {
-    input: "src/server.ts",
-    output: { file: "dist/server.js", format: "esm", inlineDynamicImports: true },
-    external,
-    plugins: [nodeResolve({ extensions }), babel({ extensions, babelHelpers: "bundled" })],
-  },
-  {
     input: "src/tui.tsx",
     output: { file: "dist/tui.js", format: "esm", inlineDynamicImports: true },
     external,

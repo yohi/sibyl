@@ -42,6 +42,7 @@ export interface LayoutManagerController {
   readonly onPtyCleanup: (paneId: PaneId, ptyId: string) => Promise<void>;
   readonly focusPane: (paneId: PaneId) => void;
   readonly forceFocus: (paneId: PaneId) => void;
+  readonly setPaneWeight: (paneId: PaneId, weight: number) => void;
   readonly getInitialPtyHandle: (paneId: PaneId) => PtyHandle | undefined;
   readonly getPendingPtyHandle: (paneId: PaneId) => Promise<PtyHandle> | undefined;
   readonly onPtySpawn: (paneId: PaneId, promise: Promise<PtyHandle>) => void;
@@ -143,6 +144,10 @@ export function createLayoutManagerController(
     setModel((current) => splitPaneInTree(current, focused, direction, newPtyOptions, paneFactory));
   };
 
+  const setPaneWeight = (paneId: PaneId, weight: number): void => {
+    setModel((current) => updatePaneWeight(current, paneId, weight));
+  };
+
   const closePane = async (id = focusedId()) => {
     if (id === undefined) return;
     const target = findPane(model(), id);
@@ -224,6 +229,7 @@ export function createLayoutManagerController(
     onPtyCleanup,
     focusPane: setFocusedId,
     forceFocus: setFocusedId,
+    setPaneWeight,
     getInitialPtyHandle,
     getPendingPtyHandle,
     onPtySpawn,
@@ -306,22 +312,27 @@ export function LayoutNode(props: LayoutNodeProps) {
               const childModel = findPane(props.model(), childId);
               if (childModel === undefined) return null;
               return (
-                <LayoutNode
-                  model={() => findPane(props.model(), childId) ?? childModel}
-                  ptyManager={props.ptyManager}
-                  paneBackend={props.paneBackend}
-                  focusedId={props.focusedId}
-                  onFocus={props.onFocus}
-                  onPtyReady={props.onPtyReady}
-                  onPtyExit={props.onPtyExit}
-                  onPtyCleanup={props.onPtyCleanup}
-                  getInitialPtyHandle={props.getInitialPtyHandle}
-                  getPendingPtyHandle={props.getPendingPtyHandle}
-                  onPtySpawn={props.onPtySpawn}
-                  mountPane={props.mountPane}
-                  unmountPane={props.unmountPane}
-                  isRoot={false}
-                />
+                <box
+                  flexGrow={findPane(props.model(), childId)?.weight ?? childModel.weight ?? 1}
+                  flexBasis={0}
+                >
+                  <LayoutNode
+                    model={() => findPane(props.model(), childId) ?? childModel}
+                    ptyManager={props.ptyManager}
+                    paneBackend={props.paneBackend}
+                    focusedId={props.focusedId}
+                    onFocus={props.onFocus}
+                    onPtyReady={props.onPtyReady}
+                    onPtyExit={props.onPtyExit}
+                    onPtyCleanup={props.onPtyCleanup}
+                    getInitialPtyHandle={props.getInitialPtyHandle}
+                    getPendingPtyHandle={props.getPendingPtyHandle}
+                    onPtySpawn={props.onPtySpawn}
+                    mountPane={props.mountPane}
+                    unmountPane={props.unmountPane}
+                    isRoot={false}
+                  />
+                </box>
               );
             }}
           </For>
@@ -329,6 +340,17 @@ export function LayoutNode(props: LayoutNodeProps) {
       )}
     </Show>
   );
+}
+
+export function updatePaneWeight(model: PaneModel, paneId: PaneId, weight: number): PaneModel {
+  if (model.id === paneId) {
+    return { ...model, weight };
+  }
+  if (model.children === undefined) return model;
+  return {
+    ...model,
+    children: model.children.map((child) => updatePaneWeight(child, paneId, weight)),
+  };
 }
 
 export function firstLeafId(model: PaneModel): string | undefined {

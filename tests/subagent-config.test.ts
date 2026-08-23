@@ -1,143 +1,83 @@
 import { describe, expect, test } from "bun:test";
-import { resolveConnection, resolveSubagentConfig } from "../src/subagent-config";
-import type { SubagentLogger } from "../src/subagent-logger";
+import { DEFAULT_OBSERVER_CONFIG, resolveObserverConfig } from "../src/subagent-config";
 
-class RecordingLogger implements SubagentLogger {
-  readonly errors: string[] = [];
-
-  info(_message: string): void {}
-
-  warn(_message: string): void {}
-
-  error(message: string): void {
-    this.errors.push(message);
-  }
-}
-
-const hostConfig = {
-  akane: {
-    experimental: {
-      watchdog: {
-        subagentDisplay: {
-          enabled: false,
-          maxPanes: 3,
-          serverUrl: "https://akane.test",
-          directory: "/akane",
-        },
-      },
-    },
-  },
-  sibyl: {
-    subagentDisplay: {
-      enabled: true,
-      maxPanes: 7,
-      serverUrl: "https://sibyl.test",
-      directory: "/sibyl",
-    },
-  },
-};
-
-describe("subagent configuration", () => {
-  test("resolves each setting with env over plugin options over akane over sibyl", () => {
-    // Given
-    const logger = new RecordingLogger();
-    const pluginOptions = {
-      enabled: true,
-      maxPanes: 5,
-      serverUrl: "https://plugin.test",
-      directory: "/plugin",
-    };
-
-    // When
-    const config = resolveSubagentConfig({
-      pluginOptions,
-      hostConfig,
-      env: { SIBYL_SUBAGENT_ENABLED: "false" },
-      logger,
-    });
-    const connection = resolveConnection({
-      pluginOptions,
-      hostConfig,
-      env: { OPENCODE_SERVER_URL: "https://env.test" },
-      logger,
-    });
-
-    // Then
-    expect(config).toEqual({ enabled: false, maxPanes: 5 });
-    expect(connection).toMatchObject({
-      serverUrl: "https://env.test",
-      directory: "/plugin",
-    });
-  });
-
-  test("uses akane and sibyl independently when higher sources omit different fields", () => {
-    // Given
-    const logger = new RecordingLogger();
-
-    // When
-    const connection = resolveConnection({
-      pluginOptions: {},
+describe("observer configuration", () => {
+  test("resolves every field independently as env over plugin over sibyl.observer over default", () => {
+    const result = resolveObserverConfig({
+      pluginOptions: { observer: { maxVisibleSubagents: 4, activityLimit: 3 } },
       hostConfig: {
-        akane: {
-          experimental: {
-            watchdog: { subagentDisplay: { serverUrl: "https://akane.test" } },
+        sibyl: {
+          observer: {
+            enabled: true,
+            maxVisibleSubagents: 2,
+            maxTrackedSubagents: 32,
+            showProvider: false,
           },
         },
-        sibyl: { subagentDisplay: { directory: "/sibyl" } },
       },
-      env: {},
-      logger,
+      env: {
+        SIBYL_OBSERVER_MAX_TRACKED_SUBAGENTS: "96",
+        SIBYL_OBSERVER_SHOW_PROVIDER: "true",
+      },
     });
 
-    // Then
-    expect(connection).toMatchObject({ serverUrl: "https://akane.test", directory: "/sibyl" });
+    expect(result.config).toEqual({
+      enabled: true,
+      maxVisibleSubagents: 4,
+      maxTrackedSubagents: 96,
+      activityLimit: 3,
+      idleRetentionMs: 300_000,
+      showModel: true,
+      showProvider: true,
+      showLatestText: true,
+      showReasoningSummary: true,
+    });
   });
 
-  test.each(["maybe", "", "2"])("rejects invalid defined boolean value %s", (enabled) => {
-    // Given / When / Then
+  test("detects and discards every legacy source", () => {
+    const result = resolveObserverConfig({
+      pluginOptions: {
+        enabled: true,
+        maxPanes: 1,
+        serverUrl: "https://legacy.test",
+        directory: "/legacy",
+      },
+      hostConfig: {
+        sibyl: { subagentDisplay: { enabled: true, maxPanes: 1 } },
+        akane: { experimental: { watchdog: { subagentDisplay: { enabled: true } } } },
+      },
+      env: {
+        SIBYL_SUBAGENT_ENABLED: "true",
+        SIBYL_SUBAGENT_MAX_PANES: "1",
+        OPENCODE_SERVER_URL: "https://legacy.test",
+        OPENCODE_PROJECT_DIR: "/legacy",
+        OPENCODE_SERVER_USERNAME: "legacy-user",
+        OPENCODE_SERVER_PASSWORD: "must-not-flow",
+      },
+    });
+
+    expect(result.legacySettingsDetected).toBe(true);
+    expect(result.config).toEqual(DEFAULT_OBSERVER_CONFIG);
+    expect(JSON.stringify(result)).not.toContain("must-not-flow");
+  });
+
+  test("does not fall through when the selected value is invalid", () => {
     expect(() =>
-      resolveSubagentConfig({
-        pluginOptions: {},
-        hostConfig,
-        env: { SIBYL_SUBAGENT_ENABLED: enabled },
-        logger: new RecordingLogger(),
+      resolveObserverConfig({
+        pluginOptions: { observer: { activityLimit: 5 } },
+        hostConfig: { sibyl: { observer: { activityLimit: 4 } } },
+        env: { SIBYL_OBSERVER_ACTIVITY_LIMIT: "0" },
       }),
-    ).toThrow();
+    ).toThrow("Invalid observer activityLimit");
   });
 
-  test("rejects selected invalid maxPanes rather than falling back", () => {
-    // Given / When / Then
+  test("rejects a non-object observer option without reading legacy fields as observer values", () => {
     expect(() =>
-      resolveSubagentConfig({
-        pluginOptions: { maxPanes: 2.5 },
-        hostConfig,
+      resolveObserverConfig({
+        pluginOptions: { observer: "true", enabled: true },
+        hostConfig: {},
         env: {},
-        logger: new RecordingLogger(),
       }),
-    ).toThrow();
-  });
-
-  test.each(["", " "])("rejects empty maxPanes value %j", (maxPanes) => {
-    // Given / When / Then
-    expect(() =>
-      resolveSubagentConfig({
-        pluginOptions: { maxPanes },
-        hostConfig,
-        env: {},
-        logger: new RecordingLogger(),
-      }),
-    ).toThrow();
-  });
-
-  test("rejects selected invalid server URL rather than falling back", () => {
-    // Given / When / Then
-    expect(() =>
-      resolveConnection({
-        pluginOptions: { serverUrl: "ftp://plugin.test", directory: "/plugin" },
-        hostConfig,
-        env: {},
-        logger: new RecordingLogger(),
-      }),
-    ).toThrow();
+    ).toThrow("Invalid observer configuration");
   });
 });

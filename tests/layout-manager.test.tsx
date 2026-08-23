@@ -217,6 +217,31 @@ describe("LayoutManager", () => {
     expect(firstLeafId(nestedModel)).toBe("pane-a");
   });
 
+  test("updates only the selected pane weight in a nested model", async () => {
+    const { updatePaneWeight } = await import("../src/layout-manager");
+
+    const updated = updatePaneWeight(nestedModel, "pane-c", 2);
+
+    expect(updated).toMatchObject({
+      children: [
+        { id: "pane-a" },
+        {
+          children: [{ id: "pane-b" }, { id: "pane-c", weight: 2 }],
+        },
+      ],
+    });
+    expect(nestedModel.children?.[1]?.children?.[1]).not.toHaveProperty("weight");
+  });
+
+  test("updates pane weight through the layout controller", async () => {
+    const { createLayoutManagerController } = await import("../src/layout-manager");
+    const controller = createLayoutManagerController(new FakePtyManager(), nestedModel);
+
+    controller.setPaneWeight("pane-a", 3);
+
+    expect(controller.model().children?.[0]?.weight).toBe(3);
+  });
+
   test("keeps a recursive child accessor current after splitting a descendant", async () => {
     // Given
     renderedNodes.length = 0;

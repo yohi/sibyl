@@ -16,4 +16,5 @@ export interface PaneModel {
   direction?: SplitDirection;
   children?: PaneModel[];
   ptyOptions?: PtyOptions;
+  weight?: number;
 }

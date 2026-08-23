@@ -1,10 +1,36 @@
+# Dependencies
 node_modules/
+
+# Build outputs
 dist/
+*.tsbuildinfo
+
+# Test & Coverage
+coverage/
 *.log
-.DS_Store
+logs/
+
+# Environment variables
 .env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Worktrees & Subprojects
 .worktrees/
-.superpowers/sdd/
+packages/
+oss/
+
+# Agent workspaces & tools
+.codegraph
 .omo/
 .nexus/
-oss/
+.justice/
+.sisyphus/
+.superpowers/
+.claude/
+.test-*/
+/tmp/

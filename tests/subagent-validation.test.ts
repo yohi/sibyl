@@ -1,51 +1,63 @@
 import { describe, expect, test } from "bun:test";
 import {
-  parseMaxPanesValue,
-  validateServerUrl,
-  validateSessionId,
+  parseObserverBoolean,
+  parseObserverInteger,
+  validateObserverCapacity,
 } from "../src/subagent-validation";
 
-describe("subagent validation", () => {
-  test("accepts disabled and bounded integer pane counts", () => {
-    // Given / When
-    const disabled = parseMaxPanesValue(0);
-    const lower = parseMaxPanesValue(1);
-    const upper = parseMaxPanesValue(8);
-
-    // Then
-    expect(disabled).toEqual({ ok: true, value: 0 });
-    expect(lower).toEqual({ ok: true, value: 1 });
-    expect(upper).toEqual({ ok: true, value: 8 });
+describe("observer validation", () => {
+  test.each([
+    ["maxVisibleSubagents", 1, 1],
+    ["maxVisibleSubagents", 8, 8],
+    ["maxTrackedSubagents", 8, 8],
+    ["maxTrackedSubagents", 256, 256],
+    ["activityLimit", 1, 1],
+    ["activityLimit", 20, 20],
+    ["idleRetentionMs", 0, 0],
+    ["idleRetentionMs", 3_600_000, 3_600_000],
+  ] as const)("accepts %s=%p", (name, value, expected) => {
+    expect(parseObserverInteger(name, value, false)).toBe(expected);
+    expect(parseObserverInteger(name, String(value), true)).toBe(expected);
   });
 
-  test.each([-1, 2.5, Number.NaN, "4", undefined, null])(
-    "rejects an invalid pane count of %p",
+  test.each([
+    ["enabled", true, "true", "1"],
+    ["showModel", false, "false", "0"],
+  ] as const)("accepts strict boolean forms for %s", (name, typed, word, numeric) => {
+    expect(parseObserverBoolean(name, typed, false)).toBe(typed);
+    expect(parseObserverBoolean(name, word, true)).toBe(typed);
+    expect(parseObserverBoolean(name, numeric, true)).toBe(typed);
+  });
+
+  test.each(["yes", "TRUE", " false ", 1, null] as const)(
+    "rejects non-contract boolean %p",
     (value) => {
-      // Given / When / Then
-      expect(parseMaxPanesValue(value).ok).toBe(false);
+      expect(() => parseObserverBoolean("enabled", value, typeof value === "string")).toThrow(
+        "Invalid observer enabled",
+      );
     },
   );
 
   test.each([
-    ["http://localhost:4096", true],
-    ["https://example.test", true],
-    ["ftp://example.test", false],
-    ["http://alice:secret@example.test", false],
-    ["https://:secret@example.test", false],
-    ["not a URL", false],
-    ["", false],
-  ])("validates attach server URL %s", (url, expected) => {
-    // Given / When / Then
-    expect(validateServerUrl(url)).toBe(expected);
+    ["maxVisibleSubagents", 0],
+    ["maxVisibleSubagents", 9],
+    ["maxTrackedSubagents", 7],
+    ["maxTrackedSubagents", 257],
+    ["activityLimit", 0],
+    ["activityLimit", 21],
+    ["idleRetentionMs", -1],
+    ["idleRetentionMs", 3_600_001],
+    ["activityLimit", 2.5],
+    ["activityLimit", "2.5"],
+  ] as const)("rejects %s=%p", (name, value) => {
+    expect(() => parseObserverInteger(name, value, typeof value === "string")).toThrow(
+      `Invalid observer ${name}`,
+    );
   });
 
-  test.each(["ses-123", "ABC123", "a-b-c"])("accepts safe session ID %s", (id) => {
-    // Given / When / Then
-    expect(validateSessionId(id)).toBe(true);
-  });
-
-  test.each(["", " ", "ses_1", "ses;1", "ses/1", "ses`1"])("rejects unsafe session ID %s", (id) => {
-    // Given / When / Then
-    expect(validateSessionId(id)).toBe(false);
+  test("enforces tracked capacity at or above visible capacity", () => {
+    expect(() => validateObserverCapacity(8, 7)).toThrow("Invalid observer maxTrackedSubagents");
+    expect(() => validateObserverCapacity(8, 8)).not.toThrow();
+    expect(() => validateObserverCapacity(1, 256)).not.toThrow();
   });
 });

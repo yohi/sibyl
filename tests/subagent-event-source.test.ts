@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { SseEventSource, TuiEventBusSource, buildSseHeaders } from "../src/subagent-event-source";
+import { SseEventSource, TuiEventBusSource } from "../src/subagent-event-source";
+import type { NormalizedObserverEvent } from "../src/subagent-event-source";
 import type { SubagentLogger } from "../src/subagent-logger";
 
 class RecordingLogger implements SubagentLogger {
@@ -18,8 +19,10 @@ class RecordingLogger implements SubagentLogger {
 
 class EventBus {
   private readonly handlers = new Map<string, (event: unknown) => void>();
+  subscriptions = 0;
 
   on(type: string, handler: (event: unknown) => void): () => void {
+    this.subscriptions += 1;
     this.handlers.set(type, handler);
     return () => this.handlers.delete(type);
   }
@@ -29,339 +32,266 @@ class EventBus {
   }
 }
 
-async function* emptyStream(): AsyncGenerator<unknown, void, undefined> {}
+function sessionInfo(id: string, parentID = "root") {
+  return { id, parentID, time: { created: 10, updated: 20 }, title: "private" };
+}
+
+function assistantInfo(id = "assistant-1") {
+  return {
+    id,
+    sessionID: "child",
+    role: "assistant",
+    time: { created: 10, completed: 20 },
+    providerID: "openai",
+    modelID: "gpt-5.6",
+  };
+}
+
+function toolPart() {
+  return {
+    id: "part-1",
+    sessionID: "child",
+    messageID: "assistant-1",
+    type: "tool",
+    callID: "call-1",
+    tool: "read",
+    state: { status: "running", time: { start: 30 } },
+  };
+}
+
+function settleAsyncEvents(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
 
 describe("subagent event sources", () => {
-  test("filters root sessions and maps child bus events", async () => {
-    // Given
+  test("normalizes the complete EventBus event matrix", () => {
     const bus = new EventBus();
-    const received: string[] = [];
-    const source = new TuiEventBusSource({ eventBus: bus, logger: new RecordingLogger() });
-    source.onEvent((event) => received.push(event.type));
-
-    // When
+    const received: NormalizedObserverEvent[] = [];
+    const source = new TuiEventBusSource({
+      eventBus: bus,
+      logger: new RecordingLogger(),
+      now: () => 50,
+    });
+    source.onEvent((event) => received.push(event));
     source.start();
-    bus.emit("session.created", {
-      properties: { info: { id: "root", time: { created: 1 } } },
-    });
-    bus.emit("session.idle", { properties: { sessionID: "root" } });
-    bus.emit("session.error", { properties: { sessionID: "root" } });
-    bus.emit("session.created", {
-      properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
-    });
-    await source.stop();
 
-    // Then
-    expect(received).toEqual(["subagent.created"]);
+    bus.emit("session.created", {
+      type: "session.created",
+      properties: { info: sessionInfo("child") },
+    });
+    bus.emit("session.updated", {
+      type: "session.updated",
+      properties: { info: sessionInfo("child") },
+    });
+    bus.emit("session.deleted", { type: "session.deleted", properties: { sessionID: "child" } });
+    bus.emit("message.updated", {
+      type: "message.updated",
+      properties: { sessionID: "child", info: assistantInfo() },
+    });
+    bus.emit("message.removed", {
+      type: "message.removed",
+      properties: { sessionID: "child", messageID: "assistant-1" },
+    });
+    bus.emit("message.part.updated", {
+      type: "message.part.updated",
+      properties: { sessionID: "child", part: toolPart(), time: 30 },
+    });
+    bus.emit("message.part.removed", {
+      type: "message.part.removed",
+      properties: { sessionID: "child", messageID: "assistant-1", partID: "part-1" },
+    });
+    bus.emit("session.status", {
+      type: "session.status",
+      properties: { sessionID: "child", status: { type: "busy" } },
+    });
+    bus.emit("session.idle", { type: "session.idle", properties: { sessionID: "child" } });
+    bus.emit("session.error", { type: "session.error", properties: { sessionID: "child" } });
+    bus.emit("session.next.retried", {
+      type: "session.next.retried",
+      properties: { sessionID: "child", attempt: 2, timestamp: 50 },
+    });
+
+    expect(received.map((event) => event.type)).toEqual([
+      "session.upsert",
+      "session.upsert",
+      "session.deleted",
+      "message.upsert",
+      "message.removed",
+      "part.upsert",
+      "part.removed",
+      "status.changed",
+      "session.idle",
+      "session.error",
+      "session.retry",
+    ]);
+    expect(received.map((event) => event.sequence)).toEqual(
+      Array.from({ length: 11 }, (_, index) => index + 1),
+    );
+    expect(received[5]).toMatchObject({
+      type: "part.upsert",
+      part: { kind: "tool", activity: { state: "running" } },
+    });
+    source.stop();
   });
 
-  test("maps valid bus events and ignores malformed payloads", async () => {
+  test("refreshes text and reasoning until message role is known", () => {
     const bus = new EventBus();
-    const logger = new RecordingLogger();
-    const received: string[] = [];
-    const source = new TuiEventBusSource({ eventBus: bus, logger });
-    source.onEvent((event) => received.push(event.type));
+    const received: NormalizedObserverEvent[] = [];
+    const source = new TuiEventBusSource({
+      eventBus: bus,
+      logger: new RecordingLogger(),
+      now: () => 50,
+    });
+    source.onEvent((event) => received.push(event));
+    source.start();
 
-    source.start();
-    source.start();
-    bus.emit("session.created", {
-      properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
+    bus.emit("message.part.updated", {
+      properties: {
+        sessionID: "child",
+        part: {
+          id: "text-1",
+          sessionID: "child",
+          messageID: "user-1",
+          type: "text",
+          text: "must not be speculatively retained",
+        },
+      },
     });
-    bus.emit("session.idle", { properties: { sessionID: "child" } });
-    bus.emit("session.error", { properties: { sessionID: "child" } });
-    bus.emit("session.deleted", {
-      properties: { info: { id: "child", parentID: "root", time: { created: 2 } } },
+    bus.emit("message.part.updated", {
+      properties: {
+        sessionID: "child",
+        part: {
+          id: "reasoning-1",
+          sessionID: "child",
+          messageID: "assistant-1",
+          type: "reasoning",
+          text: "raw reasoning",
+        },
+      },
     });
-    bus.emit("session.error", { properties: {} });
-    bus.emit("session.deleted", { properties: { info: {} } });
-    bus.emit("session.idle", { properties: {} });
-    bus.emit("session.created", null);
-    bus.emit("session.deleted", undefined);
-    bus.emit("session.idle", null);
-    bus.emit("session.error", undefined);
-    await source.stop();
-    bus.emit("session.idle", { properties: { sessionID: "after-stop" } });
 
     expect(received).toEqual([
-      "subagent.created",
-      "subagent.idle",
-      "subagent.error",
-      "subagent.deleted",
+      {
+        type: "part.refresh",
+        sequence: 1,
+        observedAt: 50,
+        sessionId: "child",
+        messageId: "user-1",
+        partId: "text-1",
+      },
+      {
+        type: "part.refresh",
+        sequence: 2,
+        observedAt: 50,
+        sessionId: "child",
+        messageId: "assistant-1",
+        partId: "reasoning-1",
+      },
     ]);
-    expect(logger.warnings).toEqual([
-      "[subagent] session.error without sessionID",
-      "[subagent] session.error without sessionID",
-    ]);
+    source.stop();
   });
 
-  test("builds an opaque Basic authorization header", () => {
-    // Given / When
-    const headers = buildSseHeaders({ username: "alice", password: "secret" });
-
-    // Then
-    expect(headers.Authorization).toBe(`Basic ${Buffer.from("alice:secret").toString("base64")}`);
-    expect(JSON.stringify(headers)).not.toContain("secret");
-  });
-
-  test("applies authentication headers to SSE subscriptions", async () => {
-    let receivedHeaders: Record<string, string> | undefined;
-    const source = new SseEventSource({
-      subscribe: async (_signal, headers) => {
-        receivedHeaders = headers;
-        return { stream: emptyStream() };
-      },
-      listSessions: async () => [],
-      auth: { username: "alice", password: "secret" },
-      logger: new RecordingLogger(),
-      sleep: async (_delay, signal) => {
-        await new Promise<void>((resolve) =>
-          signal.addEventListener("abort", resolve, { once: true }),
-        );
-      },
-    });
-
+  test("does not duplicate EventBus subscriptions when started twice and logs only static malformed errors", async () => {
+    const bus = new EventBus();
+    const logger = new RecordingLogger();
+    const source = new TuiEventBusSource({ eventBus: bus, logger });
     source.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    source.start();
+    bus.emit("session.error", { properties: { error: "token=secret" } });
     await source.stop();
 
-    expect(receivedHeaders).toEqual({
-      Authorization: `Basic ${Buffer.from("alice:secret").toString("base64")}`,
-    });
+    expect(bus.subscriptions).toBe(11);
+    expect(logger.warnings).toEqual(["[subagent] session.error without sessionID"]);
   });
 
-  test("notifies and resyncs before waiting to reconnect", async () => {
-    // Given
-    let sleepStarted = false;
-    const received: string[] = [];
-    let reconnects = 0;
+  test("unwraps SDK GlobalEvent envelopes and preserves source order", async () => {
+    const received: NormalizedObserverEvent[] = [];
     const source = new SseEventSource({
-      subscribe: async () => ({ stream: emptyStream() }),
-      listSessions: async () => [{ id: "child", parentID: "root", time: { created: 1 } }],
-      auth: {},
+      subscribe: async () => ({
+        stream: (async function* () {
+          yield {
+            directory: "/repo",
+            payload: { type: "session.created", properties: { info: sessionInfo("child") } },
+          };
+          yield {
+            directory: "/repo",
+            payload: {
+              type: "session.status",
+              properties: { sessionID: "child", status: { type: "busy" } },
+            },
+          };
+          yield {
+            directory: "/repo",
+            payload: {
+              type: "session.next.retried",
+              properties: { sessionID: "child", attempt: 2 },
+            },
+          };
+        })(),
+      }),
       logger: new RecordingLogger(),
       sleep: async (_delay, signal) => {
-        sleepStarted = true;
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+      },
+      now: () => 50,
+    });
+    source.onEvent((event) => received.push(event));
+    source.start();
+    await settleAsyncEvents();
+    await source.stop();
+
+    expect(received.map((event) => [event.sequence, event.type])).toEqual([
+      [1, "session.upsert"],
+      [2, "status.changed"],
+      [3, "session.retry"],
+    ]);
+  });
+
+  test("runs reconnect handlers before backoff after stream completion", async () => {
+    let reconnects = 0;
+    let sleeping = false;
+    const source = new SseEventSource({
+      subscribe: async () => ({ stream: (async function* () {})() }),
+      logger: new RecordingLogger(),
+      sleep: async (_delay, signal) => {
+        sleeping = true;
         await new Promise<void>((resolve) =>
           signal.addEventListener("abort", resolve, { once: true }),
         );
       },
     });
-    source.onEvent((event) => received.push(event.type));
     source.onReconnectRequired(() => {
       reconnects += 1;
     });
-
-    // When
     source.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await settleAsyncEvents();
 
-    // Then
     expect(reconnects).toBe(1);
-    expect(received).toEqual(["subagent.created"]);
-    expect(sleepStarted).toBe(true);
+    expect(sleeping).toBe(true);
     await source.stop();
   });
 
-  test("records reconnect handler failures and continues through backoff", async () => {
-    const logger = new RecordingLogger();
-    let sleepStarted = false;
-    const source = new SseEventSource({
-      subscribe: async () => ({ stream: emptyStream() }),
-      listSessions: async () => [],
-      auth: {},
-      logger,
-      sleep: async (_delay, signal) => {
-        sleepStarted = true;
-        await new Promise<void>((resolve) =>
-          signal.addEventListener("abort", resolve, { once: true }),
-        );
-      },
-    });
-    source.onReconnectRequired(() => Promise.reject(new Error("handler token=secret failed")));
-
-    source.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-
-    expect(sleepStarted).toBe(true);
-    expect(logger.warnings).toEqual([
-      "[subagent] reconnect handler failed: handler token=[redacted] failed",
-    ]);
-    await source.stop();
-  });
-
-  test("aborts a pending SSE subscription without retrying on normal shutdown", async () => {
-    // Given
+  test("aborts a pending subscription without retry warnings", async () => {
     let receivedSignal: AbortSignal | undefined;
     const logger = new RecordingLogger();
     const source = new SseEventSource({
       subscribe: async (signal) => {
         receivedSignal = signal;
-        return {
-          stream: (async function* (): AsyncGenerator<unknown, void, undefined> {
-            await new Promise<void>((resolve) =>
-              signal.addEventListener("abort", resolve, { once: true }),
-            );
-            throw new DOMException("cancelled", "AbortError");
-          })(),
-        };
+        await new Promise<void>((resolve) =>
+          signal.addEventListener("abort", resolve, { once: true }),
+        );
+        throw new DOMException("cancelled", "AbortError");
       },
-      listSessions: async () => [],
-      auth: {},
       logger,
       sleep: async () => {},
     });
-
-    // When
     source.start();
     await Promise.resolve();
     await source.stop();
 
-    // Then
     expect(receivedSignal?.aborted).toBe(true);
-    expect(logger.warnings).toEqual([]);
-  });
-
-  test("logs stream, resync, and reconnect delay failures", async () => {
-    const logger = new RecordingLogger();
-    let firstSleep = true;
-    let sleepSignal: AbortSignal | undefined;
-    const source = new SseEventSource({
-      subscribe: async () => {
-        throw new Error("stream failed");
-      },
-      listSessions: async () => {
-        throw new Error("resync failed");
-      },
-      auth: {},
-      logger,
-      sleep: async (_delay, signal) => {
-        if (firstSleep) {
-          firstSleep = false;
-          throw new Error("delay failed");
-        }
-        sleepSignal = signal;
-        await new Promise<void>((resolve) =>
-          signal.addEventListener("abort", resolve, { once: true }),
-        );
-      },
-    });
-
-    source.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await source.stop();
-
-    expect(logger.warnings).toEqual([
-      "[subagent] SSE stream error: stream failed",
-      "[subagent] resync list failed: resync failed",
-      "[subagent] reconnect delay failed: delay failed",
-      "[subagent] SSE stream error: stream failed",
-      "[subagent] resync list failed: resync failed",
-    ]);
-    expect(sleepSignal?.aborted).toBe(true);
-  });
-
-  test("maps SSE events and resyncs only child sessions", async () => {
-    const logger = new RecordingLogger();
-    const received: string[] = [];
-    const source = new SseEventSource({
-      subscribe: async () => ({
-        stream: (async function* (): AsyncGenerator<unknown, void, undefined> {
-          yield {
-            type: "session.created",
-            properties: { info: { id: "child", parentID: "root", time: { created: 1 } } },
-          };
-          yield {
-            type: "session.idle",
-            properties: { sessionID: "child" },
-          };
-          yield {
-            type: "session.error",
-            properties: { sessionID: "child" },
-          };
-          yield {
-            type: "session.deleted",
-            properties: { info: { id: "child", parentID: "root", time: { created: 1 } } },
-          };
-          yield { type: "session.error", properties: {} };
-          yield {
-            type: "session.created",
-            properties: { info: { id: "root", time: { created: 2 } } },
-          };
-          yield { type: "session.idle", properties: { sessionID: "root" } };
-          yield { type: "session.error", properties: { sessionID: "root" } };
-          yield null;
-          yield { type: "unknown" };
-        })(),
-      }),
-      listSessions: async () => [],
-      auth: {},
-      logger,
-      sleep: async (_delay, signal) => {
-        await new Promise<void>((resolve) =>
-          signal.addEventListener("abort", resolve, { once: true }),
-        );
-      },
-    });
-    source.onEvent((event) => received.push(event.type));
-
-    source.start();
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await source.stop();
-
-    expect(received).toEqual([
-      "subagent.created",
-      "subagent.idle",
-      "subagent.error",
-      "subagent.deleted",
-    ]);
-    expect(logger.warnings).toEqual(["[subagent] session.error without sessionID"]);
-  });
-
-  test("stops immediately when the lifecycle is already aborted", async () => {
-    const lifecycle = new AbortController();
-    lifecycle.abort();
-    let subscribed = false;
-    const source = new SseEventSource({
-      subscribe: async () => {
-        subscribed = true;
-        return { stream: emptyStream() };
-      },
-      listSessions: async () => [],
-      auth: {},
-      logger: new RecordingLogger(),
-      sleep: async () => {},
-      lifecycleSignal: lifecycle.signal,
-    });
-
-    source.start();
-    await source.stop();
-
-    expect(subscribed).toBe(false);
-  });
-
-  test("does not consume a stream resolved after shutdown", async () => {
-    const logger = new RecordingLogger();
-    const source = new SseEventSource({
-      subscribe: async () => ({
-        stream: {
-          [Symbol.asyncIterator]() {
-            return {
-              next: async () => {
-                throw new Error("stream should not be consumed after shutdown");
-              },
-            };
-          },
-        },
-      }),
-      listSessions: async () => [],
-      auth: {},
-      logger,
-      sleep: async () => {},
-    });
-
-    source.start();
-    await source.stop();
-
     expect(logger.warnings).toEqual([]);
   });
 });
