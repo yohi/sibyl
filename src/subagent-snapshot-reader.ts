@@ -100,7 +100,9 @@ function arrayData(value: unknown): readonly unknown[] {
 
 function recordData(value: unknown): RecordValue | undefined {
   const data = dataOf(value);
-  return isRecord(data) ? data : isRecord(value) ? value : undefined;
+  if (isRecord(data)) return data;
+  if (isRecord(value)) return value;
+  return undefined;
 }
 
 function isAbortError(error: unknown): boolean {

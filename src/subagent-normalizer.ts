@@ -61,7 +61,14 @@ export function projectSession(value: unknown): SafeSessionProjection | undefine
 }
 
 export function normalizeRuntimeStatus(value: unknown): ObserverRuntimeStatus {
-  const status = typeof value === "string" ? value : isRecord(value) ? value.type : undefined;
+  let status: unknown;
+  if (typeof value === "string") {
+    status = value;
+  } else if (isRecord(value)) {
+    status = value.type;
+  } else {
+    status = undefined;
+  }
   switch (status) {
     case "busy":
       return "busy";
