@@ -32,7 +32,17 @@ TUI EventBus または既存 transport を利用する SSE 実装からイベン
 
 ### `subagent-registry.ts`
 
-親セッション単位の状態所有者です。初期 snapshot とイベントの競合を吸収し、状態変更を coalesce して購読者へ通知します。表示対象、保留イベント、活動履歴、参照数、idle retention、overflow counter を bounded に保ちます。
+親セッション単位の状態所有者です。初期 snapshot とイベントの競合を吸収し、状態変更を coalesce して購読者へ通知します。
+
+#### Bounded state 契約
+
+`maxTrackedSubagents` は、現在の親に属する安全な直接の子 Session のうち、hydrated な詳細状態を持つ `tracked` entry 数だけを制限します。`maxVisibleSubagents` は表示数の制限であり、表示されない下位順位の tracked entry を削除するものではありません。hydration 中の pending child bucket、capacity 超過 child の omitted-ID deduplication set、削除済み child の tombstone set は tracked entry とは別の補助状態ですが、それぞれも `maxTrackedSubagents` 件に制限します。各 child の pending event、activity history、message/part reference も coalescing と個別の reference limit で bounded に保ちます。
+
+capacity が満杯のときは、retention deadline を過ぎた `idle` entry だけを期限順に退避できます。`busy`、`retry`、`error`、`unknown` の entry、retention 中の `idle` entry、および retention deadline が未設定の `idle` entry は active とみなし、capacity 超過を理由に削除・status変更しません。退避候補がなければ新しい child の詳細状態を省略し、ID 一覧を無制限に保存せず、bounded な飽和型 `overflowCount` を更新します。
+
+snapshot reader の `omittedCount` は、その snapshot で追跡容量から外れた直接の子候補数です。Registry の `overflowCount` は snapshot omission と event admission failure をまとめた aggregate indicator で、distinct omitted ID 数を保証しません。初期 snapshot と成功した resync では snapshot の omission を基準に再設定し、event 由来の同一 ID は bounded set で重複排除します。既知の omitted child の削除時だけ減算し、親変更・停止時には補助状態とともにクリアします。
+
+容量解放後または次の成功した snapshot/resync 時に、直接の子候補を urgency、更新時刻、ID の順で再選択します。`session.upsert` は空きがある場合、または期限切れ idle entry を退避できる場合に再追跡されます。削除、idle retention expiry、source reconnect は resync を要求し、tombstone で stale snapshot からの再登録を防ぎます。
 
 ### `subagent-observer.tsx`
 
@@ -58,7 +68,7 @@ Observer はプロセスを生成しないため、PTY や shell の終了処理
 - 外部データは normalizer を通過するまで Registry に入りません。
 - 生の SDK オブジェクト、Tool payload、Tool output、error、metadata、credential は保持しません。
 - ログには静的な操作識別子と sanitized error category だけを出力します。
-- `maxTrackedSubagents` を超えた直接の子は bounded overflow として数え、無制限に保持しません。
+- `maxTrackedSubagents` を超えた直接の子は、上記の bounded state 契約に従って詳細状態を保持せず、aggregate overflow として扱います。無制限の child entry、pending bucket、omitted ID、tombstone は保持しません。
 
 ## 現在の制限
 

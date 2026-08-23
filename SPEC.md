@@ -140,18 +140,35 @@ ID と表示名には最大長と英数字を中心とする syntax check を適
 4. 最大 8 並列で選択済み子 Session を hydrate する。
 5. snapshot 後に到着したイベントを source order で適用する。
 
-Snapshot の対象外になった子は `omittedCount` または bounded overflow counter に反映します。
+Snapshot の対象外になった子は `omittedCount` に反映します。`omittedCount` は、親に属する安全な直接の子候補のうち、snapshot reader の追跡容量に入らなかった件数です。削除済みとして tombstone で無視した ID や親が一致しない Session は候補数にも含めません。
 
 ## 7. Registry と表示
 
 `SubagentRegistry` は親 ID、hydrated child、pending correlation、activity history、message/part reference、resync を所有します。
 
-- `maxTrackedSubagents` を超える候補は無制限に保持しません。
+### 7.1 Tracking capacity と bounded overflow
+
+`maxTrackedSubagents` は、現在選択されている親に属する直接の子 Session について、hydrated な詳細状態を持つ Registry entry 数の上限です。候補は安全に正規化され、`parentSessionId` が現在の親 ID と完全一致する Session に限ります。`maxVisibleSubagents` は表示するカード数だけを制限し、追跡済みだが表示順位が下位の child entry は Registry に残します。
+
+`pending correlation` の child bucket、capacity 超過した Session ID の重複排除用 `omitted` set、削除済み Session の tombstone set は tracked entry とは別の補助状態です。これらも `maxTrackedSubagents` 件を上限とし、各 bucket 内のイベントや参照は既定の coalescing と reference limit で bounded に保ちます。Session の詳細、raw event、無制限の omitted ID 一覧は capacity を超えて保持しません。
+
+ここでいう active entry（capacity eviction の対象外）は、`busy`、`retry`、`error`、`unknown` の child、retention deadline がまだ到来していない `idle` child、または retention deadline が未設定の `idle` child です。capacity 超過時は、まず retention deadline を過ぎた `idle` entry のうち期限の早いものだけを退避候補にします。退避可能な entry がない場合、新しい直接の子の詳細状態を追跡せず、既存の active entry を削除せず、status や保持中の参照も変更しません。
+
+capacity 超過を表す `overflowCount` は、bounded な aggregate indicator です。Session ID の一覧や、現在の distinct omitted child 数を保証する値ではありません。
+
+- 初期 snapshot と成功した resync では、snapshot の `omittedCount` と、reader が上限を超えて返した追加 child 数を基準に再設定します。過去の snapshot の値を累積しません。
+- capacity が空いておらず event 経由の新規 child を追跡できない場合は、同じ Session ID を bounded omitted set で重複排除して加算します。set の上限を超えた新規省略も、counter 自体を飽和加算します。
+- 既知の event-originated omitted child が削除された場合は omitted set から除去し、counter を 0 未満にならないよう減算します。counter が飽和済みの場合は、次の成功した snapshot で基準値が確定するまで飽和状態を維持します。
+- 親の切り替えまたは Registry の停止時は tracked、pending、omitted、tombstone とともに 0 に戻します。
+
+`overflowCount` は、`maxVisibleSubagents` を超えているが追跡自体は継続している view の件数を含みません。Sidebar の omitted 表示は、`overflowCount` と表示上限を超えた tracked view 数を合算したものです。
+
+容量が解放されたとき、または次の snapshot/resync が成功したときに再追跡を試みます。新しい `session.upsert` は空きがある場合、または期限切れの idle entry を退避できる場合に admission されます。snapshot/resync では、候補を urgency、更新時刻、ID の順で再選択します。削除、idle retention expiry、source reconnect は resync を要求します。tombstone が残る削除済み ID は stale snapshot から再登録せず、後続の成功した snapshot で tombstone の扱いが確定するまで除外します。
+
 - `maxVisibleSubagents` 件だけをカードとして表示します。
 - `activityLimit` を超える履歴は保持しません。
 - `idleRetentionMs` が経過した idle child は破棄対象です。
 - delete は即時に反映します。
-- active entry は capacity 超過時に自動削除しません。
 - イベント burst は coalesce して購読者を通知します。
 - Registry snapshot は Solid subscriber が読み取る immutable view です。
 
