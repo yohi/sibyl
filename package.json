@@ -31,7 +31,7 @@
     "build": "tsc --emitDeclarationOnly && rollup -c",
     "build:types": "tsc --emitDeclarationOnly",
     "test": "bun test --path-ignore-patterns 'tests/subagent-observer.test.tsx' --path-ignore-patterns 'tests/subagent-integration.test.ts' && bun test --conditions=browser --preload @opentui/solid/preload ./tests/subagent-observer.test.tsx ./tests/subagent-integration.test.ts ./tests/pane-render.integration.tsx ./tests/pty-render-latency.integration.tsx",
-    "test:coverage": "bun test --coverage --coverage-reporter=lcov --path-ignore-patterns 'tests/subagent-observer.test.tsx' --path-ignore-patterns 'tests/subagent-integration.test.ts' && bun test --coverage --coverage-reporter=lcov --conditions=browser --preload @opentui/solid/preload ./tests/subagent-observer.test.tsx ./tests/subagent-integration.test.ts ./tests/pane-render.integration.tsx ./tests/pty-render-latency.integration.tsx",
+    "test:coverage": "bun test --coverage --coverage-dir=coverage/unit --coverage-reporter=lcov --path-ignore-patterns 'tests/subagent-observer.test.tsx' --path-ignore-patterns 'tests/subagent-integration.test.ts' && bun test --coverage --coverage-dir=coverage/browser --coverage-reporter=lcov --conditions=browser --preload @opentui/solid/preload ./tests/subagent-observer.test.tsx ./tests/subagent-integration.test.ts ./tests/pane-render.integration.tsx ./tests/pty-render-latency.integration.tsx",
     "lint": "biome check .",
     "lint:fix": "biome check . --write",
     "format": "biome format . --write",
