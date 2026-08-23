@@ -8,7 +8,7 @@ import type {
   ObserverSnapshotReader,
 } from "../src/subagent-snapshot-reader";
 import type { SubagentLogger } from "../src/subagent-logger";
-import type { SafePartProjection } from "../src/subagent-types";
+import type { SafeMessageProjection, SafePartProjection } from "../src/subagent-types";
 import { createDeferred } from "./helpers/deferred";
 
 class RecordingLogger implements SubagentLogger {
@@ -368,6 +368,21 @@ describe("SubagentRegistry", () => {
     );
   });
 
+  test("does not resync after deleting an unrelated session", async () => {
+    let reads = 0;
+    const { registry, source } = registryFor({
+      readParent: async (parentSessionId) => {
+        reads += 1;
+        return snapshot(parentSessionId, []);
+      },
+    });
+    await registry.selectParent("root");
+
+    source.emit({ type: "session.deleted", sequence: 1, observedAt: 1, sessionId: "unrelated" });
+
+    expect(reads).toBe(1);
+  });
+
   test("retains only the configured number of completed activities and coalesces notifications", async () => {
     const { registry, source } = registryFor({
       config: { ...DEFAULT_OBSERVER_CONFIG, activityLimit: 1 },
@@ -384,6 +399,48 @@ describe("SubagentRegistry", () => {
     await Promise.resolve();
     expect(notifications).toBe(1);
     unsubscribe();
+  });
+
+  test("bounds live message and part references", async () => {
+    const { registry, source } = registryFor({
+      readParent: async () => snapshot("root", [hydratedChild("child", "root")]),
+    });
+    await registry.selectParent("root");
+
+    for (let index = 1; index <= 33; index += 1) {
+      const message: SafeMessageProjection = {
+        id: `assistant-${index}`,
+        sessionId: "child",
+        role: "assistant",
+        createdAt: index,
+        hasError: false,
+      };
+      source.emit({ type: "message.upsert", sequence: index, observedAt: index, message });
+    }
+    for (let index = 1; index <= 65; index += 1) {
+      source.emit(
+        partUpsert(
+          toolPart("child", "assistant-33", `tool-${index}`, "completed", index + 33),
+          index + 33,
+        ),
+      );
+    }
+
+    expect(registry.debugCounts()).toMatchObject({ messageReferences: 32, partReferences: 64 });
+  });
+
+  test("retains a live tool activity before its message is available", async () => {
+    const { registry, source } = registryFor({
+      readParent: async () => snapshot("root", [hydratedChild("child", "root")]),
+    });
+    await registry.selectParent("root");
+
+    source.emit(partUpsert(toolPart("child", "assistant-1", "tool-1", "running", 1), 1));
+
+    expect(registry.snapshot().views[0]?.currentActivity).toMatchObject({
+      id: "tool-1",
+      state: "running",
+    });
   });
 
   test("drops a late message refresh after parent selection changes", async () => {

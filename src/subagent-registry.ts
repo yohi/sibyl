@@ -233,6 +233,23 @@ function partObservedAt(part: SafePartProjection): number {
   return isToolPart(part) ? part.activity.updatedAt : part.observedAt;
 }
 
+function referencePriority(part: SafePartProjection): string | undefined {
+  switch (part.kind) {
+    case "agent":
+      return "agent";
+    case "subtask":
+      return "subtask";
+    case "assistant-text":
+      return "assistant-text";
+    case "public-reasoning-summary":
+      return "public-reasoning-summary";
+    case "tool":
+      return part.activity.state === "running" || part.activity.state === "pending"
+        ? `tool:${part.activity.state}`
+        : undefined;
+  }
+}
+
 function newestPart<T extends SafePartProjection>(
   parts: Iterable<SafePartProjection>,
   predicate: (part: SafePartProjection) => part is T,
@@ -635,7 +652,9 @@ export class SubagentRegistry {
       ) {
         continue;
       }
-      this.tracked.set(child.session.id, createTrackedChild(child));
+      const trackedChild = createTrackedChild(child);
+      this.trimReferences(trackedChild);
+      this.tracked.set(child.session.id, trackedChild);
       selected += 1;
     }
     const extraChildren = Math.max(0, snapshot.children.length - selected);
@@ -708,6 +727,7 @@ export class SubagentRegistry {
         this.queueRefresh(sessionId, event.messageId, event.sequence);
         break;
     }
+    this.trimReferences(child);
   }
 
   private applySessionUpsert(
@@ -741,13 +761,14 @@ export class SubagentRegistry {
   ): void {
     const sessionId = event.sessionId;
     const wasTracked = this.tracked.has(sessionId);
+    const wasPending = this.pending.has(sessionId);
+    const wasOmitted = this.omittedIds.has(sessionId);
+    if (!wasTracked && !wasPending && !wasOmitted) return;
     this.removeTracked(sessionId);
     this.pending.delete(sessionId);
     this.removeOmitted(sessionId);
     this.addTombstone(sessionId);
-    if ((wasTracked || this.tombstones.has(sessionId)) && !suppressResync) {
-      void this.resyncNow();
-    }
+    if (!suppressResync) void this.resyncNow();
   }
 
   private applyStatus(
@@ -965,11 +986,39 @@ export class SubagentRegistry {
         child.parts.set(part.partId, part);
       }
     }
+    this.trimReferences(child);
     child.updatedAt = Math.max(
       child.updatedAt,
       message?.createdAt ?? 0,
       ...parts.map((part) => (part.kind === "tool" ? part.activity.updatedAt : part.observedAt)),
     );
+  }
+
+  private trimReferences(child: TrackedChild): void {
+    const messages = [...child.messages.values()]
+      .sort((left, right) => compareNewest(left.createdAt, left.id, right.createdAt, right.id))
+      .slice(0, MESSAGE_REFERENCE_LIMIT);
+    child.messages.clear();
+    for (const message of messages) child.messages.set(message.id, message);
+
+    const parts = [...child.parts.values()].sort((left, right) =>
+      compareNewest(partObservedAt(left), left.partId, partObservedAt(right), right.partId),
+    );
+    const selected = new Map<string, SafePartProjection>();
+    const priorities = new Set<string>();
+    for (const part of parts) {
+      const priority = referencePriority(part);
+      if (priority !== undefined && !priorities.has(priority)) {
+        priorities.add(priority);
+        selected.set(part.partId, part);
+      }
+    }
+    for (const part of parts) {
+      if (selected.size >= PART_REFERENCE_LIMIT) break;
+      if (!selected.has(part.partId)) selected.set(part.partId, part);
+    }
+    child.parts.clear();
+    for (const part of selected.values()) child.parts.set(part.partId, part);
   }
 
   private abortRefresh(sessionId: string): void {
