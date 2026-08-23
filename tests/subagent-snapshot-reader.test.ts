@@ -153,6 +153,25 @@ describe("OpenCode snapshot reader", () => {
     });
   });
 
+  test("returns ignored child IDs in locale order", async () => {
+    const reader = createOpenCodeSnapshotReader(
+      fakeSnapshotDependencies({
+        children: [session("a", "root", 20), session("A", "root", 10)],
+        calls: [],
+      }),
+    );
+
+    const result = await reader.readParent(
+      "root",
+      { ...DEFAULT_OBSERVER_CONFIG, maxTrackedSubagents: 8 },
+      new AbortController().signal,
+      new Set(["a", "A"]),
+    );
+
+    expect(result.children).toEqual([]);
+    expect(result.ignoredSessionIdsSeen).toEqual(["a", "A"]);
+  });
+
   test("keeps urgent children when the initial snapshot exceeds capacity", async () => {
     const calls: string[] = [];
     const children = Array.from({ length: 9 }, (_, index) =>

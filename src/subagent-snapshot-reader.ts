@@ -295,7 +295,7 @@ export function createOpenCodeSnapshotReader(
         parentSessionId,
         children,
         omittedCount: Math.max(0, candidates.length - selected.length),
-        ignoredSessionIdsSeen: [...ignored].sort(),
+        ignoredSessionIdsSeen: [...ignored].sort((left, right) => left.localeCompare(right)),
       };
     } catch (error) {
       if (!isAbortError(error)) {
