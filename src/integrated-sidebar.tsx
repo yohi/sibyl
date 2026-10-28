@@ -90,24 +90,34 @@ export function IntegratedSidebar(props: {
     const result = resolver.resolve(child, parts);
     return result.kind === "resolved" ? result.category : undefined;
   };
+  let hadAvailableState = false;
   const refresh = () => {
     const paths = props.api.state.path;
     const directory = paths?.worktree || paths?.directory;
+    const primary = paths?.worktree ? readAkaneState(akaneStatePath(paths.worktree)) : undefined;
+    const alternate = paths?.directory
+      ? readAkaneState(akaneStatePath(paths.directory))
+      : undefined;
+    const availableState = selectAkaneState(primary, alternate, props.sessionId, Date.now());
+    setState(availableState);
+    if (availableState === undefined) {
+      hadAvailableState = false;
+      return;
+    }
+    if (!hadAvailableState) void refreshColors();
+    hadAvailableState = true;
+    if (!props.registry) return;
     resolver.refresh({
       ...(directory ? { taskDirectory: join(directory, ".omo", "senpi-task", "tasks") } : {}),
       teamRuntimeDirectory: join(homedir(), ".omo", "runtime"),
     });
     changed();
-    const primary = paths?.worktree ? readAkaneState(akaneStatePath(paths.worktree)) : undefined;
-    const alternate = paths?.directory
-      ? readAkaneState(akaneStatePath(paths.directory))
-      : undefined;
-    setState(selectAkaneState(primary, alternate, props.sessionId, Date.now()));
   };
   refresh();
-  void refreshColors();
   const timer = setInterval(refresh, 1000);
-  const colorTimer = setInterval(() => void refreshColors(), 30_000);
+  const colorTimer = setInterval(() => {
+    if (state() !== undefined) void refreshColors();
+  }, 30_000);
   const stop = () => {
     if (disposed) return;
     disposed = true;

@@ -8,7 +8,15 @@ Observer はデフォルトで無効です。有効化しても、セッショ�
 
 ## インストール
 
-TUI プラグインだけを登録します。
+Akane の server プラグインは `opencode.json` に登録します。
+
+```json
+{
+  "plugin": ["@yohi/akane"]
+}
+```
+
+Sibyl の TUI プラグインは `tui.json` に登録します。
 
 ```json
 {
@@ -16,7 +24,7 @@ TUI プラグインだけを登録します。
 }
 ```
 
-旧 Server プラグインや互換ルートの登録は不要です。
+旧 `@yohi/akane/tui` の登録を削除し、OpenCode を再起動してください。
 
 ## Observer 設定
 
