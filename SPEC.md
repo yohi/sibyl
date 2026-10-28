@@ -1,6 +1,6 @@
 # Sibyl v2 Observer 仕様書
 
-本仕様書は `@yohi/sibyl/tui` の現行 Observer 契約を定義します。Observer は OpenCode TUI の既存データを読み取り、アクティブな親セッションの直接の子セッションを `sidebar_content` に表示します。
+This document defines the `@yohi/sibyl/tui` Observer and akane integration contract. The read-only sidebar displays akane status and direct child sessions when akane is available.
 
 ## 1. 製品境界
 
@@ -21,7 +21,7 @@ Observer は次の操作を実行しません。
 - route、keymap、layout、pane の登録または操作
 - PTY、shell、外部 process の起動
 - 接続先、ディレクトリ、認証情報の解決
-- Akane のロード、設定、参照、描画
+- Akane の監視、復旧、設定の変更
 
 ## 2. 構成
 
@@ -239,7 +239,7 @@ Observer v2 には独立した Server entry はありません。
 
 ## 11. 受け入れ基準
 
-- Observer が無効な場合、TUI 起動は source、Registry、slot を生成しません。
+- Observer が無効な場合、source と Registry を生成しません。watchdog 表示用の slot は登録します。
 - Observer が有効な場合、登録されるのは `sidebar_content` だけです。
 - 直接の子 1 件、複数件、最大表示数超過、idle retention、削除、親変更を正しく扱います。
 - 初期 hydrate 中の event と再同期中の event を失わずに適用します。
@@ -255,4 +255,4 @@ v1 は PTY を利用したマルチペイン統合コンソールを試験した
 
 ## 13. 将来検討
 
-Akane などの外部設定・表示システムとの連携は、現行 Observer の境界外です。Akane との統合は、Akane が版号付きの互換公開統合 API を公開した後でのみ開始します。その段階では既存 runtime view を補強する optional health adapter を追加するにとどめ、watchdog や recovery の挙動を Sibyl 側へ移しません。再導入する場合は、設定の所有権、データ allowlist、secret handling、ライフサイクルを別仕様として定義し、既存の Observer core に暗黙依存させません。
+Akane writes `.akane/watchdog-state.json` atomically. Sibyl reads version `1` at one-second intervals and only renders the watchdog and Observer when the state is enabled, valid, no more than 90 seconds old, and no more than 30 seconds in the future. Unavailable or unsupported state hides both views; recovery restores them. Akane remains independently executable and owns monitoring and recovery.

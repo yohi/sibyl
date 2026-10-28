@@ -1,6 +1,6 @@
 import type { TuiPluginApi, TuiSlotContext } from "@opencode-ai/plugin/tui";
 import { jsx } from "@opentui/solid/jsx-runtime";
-import { SidebarObserver } from "./subagent-observer.js";
+import { IntegratedSidebar } from "./integrated-sidebar.js";
 import type { ObserverConfig } from "./subagent-config.js";
 import type { ObserverEventSource } from "./subagent-event-source.js";
 import { TuiEventBusSource } from "./subagent-event-source.js";
@@ -32,10 +32,6 @@ export interface ObserverIntegrationDependencies {
   readonly snapshotReader?: ObserverSnapshotReader;
 }
 
-function disabledHandle(): ObserverIntegrationHandle {
-  return { enabled: false, stop: async () => {}, resyncNow: async () => {} };
-}
-
 function createSnapshotReader(
   api: ObserverIntegrationApi,
   logger: SubagentLogger,
@@ -64,18 +60,21 @@ export async function attachSubagentIntegration(
   config: ObserverConfig,
   deps: ObserverIntegrationDependencies = {},
 ): Promise<ObserverIntegrationHandle> {
-  if (!config.enabled) return disabledHandle();
-
   const logger = deps.logger ?? consoleSubagentLogger;
-  const eventSource = deps.eventSource ?? new TuiEventBusSource({ eventBus: api.event, logger });
-  const snapshotReader = deps.snapshotReader ?? createSnapshotReader(api, logger);
-  const registry = new SubagentRegistry({ eventSource, snapshotReader, config, logger });
+  const registry = config.enabled
+    ? new SubagentRegistry({
+        eventSource: deps.eventSource ?? new TuiEventBusSource({ eventBus: api.event, logger }),
+        snapshotReader: deps.snapshotReader ?? createSnapshotReader(api, logger),
+        config,
+        logger,
+      })
+    : undefined;
   let stopped = false;
 
   const stop = async (): Promise<void> => {
     if (stopped) return;
     stopped = true;
-    await registry.stop();
+    await registry?.stop();
   };
 
   api.slots.register({
@@ -86,8 +85,9 @@ export async function attachSubagentIntegration(
       ) =>
         jsx(
           () =>
-            SidebarObserver({
-              registry,
+            IntegratedSidebar({
+              api,
+              ...(registry ? { registry } : {}),
               config,
               sessionId: props.session_id,
               theme: context.theme.current,
@@ -99,9 +99,9 @@ export async function attachSubagentIntegration(
   api.lifecycle.onDispose(stop);
 
   return {
-    enabled: true,
-    registry,
+    enabled: config.enabled,
+    ...(registry ? { registry } : {}),
     stop,
-    resyncNow: () => registry.resyncNow(),
+    resyncNow: () => registry?.resyncNow() ?? Promise.resolve(),
   };
 }

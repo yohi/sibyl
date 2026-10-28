@@ -8,6 +8,9 @@ import { attachSubagentIntegration } from "../src/subagent-integration";
 import type { SubagentLogger } from "../src/subagent-logger";
 import type { ObserverSnapshotReader } from "../src/subagent-snapshot-reader";
 import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 class MemoryObserverEventSource implements ObserverEventSource {
   started = 0;
@@ -136,7 +139,81 @@ const testTheme = {
 const enabledConfig: ObserverConfig = { ...DEFAULT_OBSERVER_CONFIG, enabled: true };
 
 describe("attachSubagentIntegration", () => {
-  test("does not construct or register observer resources when disabled", async () => {
+  test("releases category event subscriptions on lifecycle abort", async () => {
+    const { api, registrations } = makeApi();
+    const controller = new AbortController();
+    let subscribed = 0;
+    let released = 0;
+    Object.assign(api.event, {
+      on: () => {
+        subscribed += 1;
+        return () => {
+          released += 1;
+        };
+      },
+    });
+    Object.assign(api.lifecycle, { signal: controller.signal });
+    const handle = await attachSubagentIntegration(api, DEFAULT_OBSERVER_CONFIG, { logger });
+    const slot = registrations[0]?.slots.sidebar_content;
+    if (!slot) throw new Error("sidebar missing");
+    const setup = await testRender(
+      () => slot({ theme: { current: testTheme } }, { session_id: "root" }),
+      { width: 40, height: 10 },
+    );
+    try {
+      expect(subscribed).toBeGreaterThan(0);
+      controller.abort();
+      expect(released).toBe(subscribed);
+    } finally {
+      setup.renderer.destroy();
+      await handle.stop();
+    }
+  });
+  test("shows and hides the sidebar as akane starts and stops", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "sibyl-integration-"));
+    mkdirSync(join(directory, ".akane"));
+    const statePath = join(directory, ".akane", "watchdog-state.json");
+    const { api, registrations } = makeApi();
+    Object.assign(api.state, { path: { directory, worktree: directory } });
+    const handle = await attachSubagentIntegration(api, DEFAULT_OBSERVER_CONFIG, { logger });
+    const renderSidebar = registrations[0]?.slots.sidebar_content;
+    if (!renderSidebar) throw new Error("sidebar missing");
+    const setup = await testRender(
+      () => renderSidebar({ theme: { current: testTheme } }, { session_id: "parent-1" }),
+      { width: 50, height: 20 },
+    );
+    try {
+      await setup.renderOnce();
+      expect(setup.captureCharFrame()).not.toContain("Akane Watchdog");
+      const state = {
+        version: 1,
+        enabled: true,
+        timestamp: Date.now(),
+        global: { hangupsDetected: 0, pingsSent: 0, recoveries: 0, silencedFailures: 0 },
+        sessions: {},
+      };
+      writeFileSync(statePath, JSON.stringify(state));
+      await Bun.sleep(1100);
+      await setup.renderOnce();
+      expect(setup.captureCharFrame()).toContain("Akane Watchdog");
+      writeFileSync(statePath, JSON.stringify({ ...state, enabled: false }));
+      await Bun.sleep(1100);
+      await setup.renderOnce();
+      expect(setup.captureCharFrame()).not.toContain("Akane Watchdog");
+    } finally {
+      setup.renderer.destroy();
+      await handle.stop();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  test("registers the watchdog sidebar even when the observer is disabled", async () => {
+    const { api, registrations } = makeApi();
+    const handle = await attachSubagentIntegration(api, DEFAULT_OBSERVER_CONFIG, { logger });
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]?.slots.sidebar_content).toBeDefined();
+    await handle.stop();
+  });
+  test("does not construct observer resources when disabled", async () => {
     const source = new MemoryObserverEventSource();
     const { api, registrations, disposers } = makeApi();
     const handle = await attachSubagentIntegration(api, DEFAULT_OBSERVER_CONFIG, {
@@ -152,8 +229,8 @@ describe("attachSubagentIntegration", () => {
 
     expect(handle.enabled).toBe(false);
     expect(handle.registry).toBeUndefined();
-    expect(registrations).toHaveLength(0);
-    expect(disposers).toHaveLength(0);
+    expect(registrations).toHaveLength(1);
+    expect(disposers).toHaveLength(1);
     expect(source.started).toBe(0);
   });
 
@@ -182,8 +259,8 @@ describe("attachSubagentIntegration", () => {
       { width: 42, height: 10 },
     );
     const element = setup.renderer.root.getChildren()[0];
-    expect(element).toBeDefined();
-    expect(source.started).toBe(1);
+    expect(element).toBeUndefined();
+    expect(source.started).toBe(0);
     setup.renderer.destroy();
     await handle.stop();
   });

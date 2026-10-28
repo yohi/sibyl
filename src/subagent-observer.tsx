@@ -2,6 +2,7 @@ import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui";
 import type { RGBA } from "@opentui/core";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@opentui/solid";
+import { categoryColor } from "./tui-category.js";
 import type { ObserverConfig } from "./subagent-config.js";
 import type { SubagentRegistry } from "./subagent-registry.js";
 import type {
@@ -15,12 +16,14 @@ export interface SidebarObserverProps {
   readonly config: ObserverConfig;
   readonly sessionId: string;
   readonly theme: TuiThemeCurrent;
+  readonly categoryFor?: (sessionId: string) => string | undefined;
 }
 
 export interface SubagentCardProps {
   readonly view: SubagentRuntimeView;
   readonly config: ObserverConfig;
   readonly theme: TuiThemeCurrent;
+  readonly category?: string | undefined;
 }
 
 function clip(value: string, limit = 160): string {
@@ -72,6 +75,11 @@ export function SubagentCard(props: SubagentCardProps): JSX.Element {
         content={`${clip(props.view.agentName, 80)} · ${props.view.status.toUpperCase()}`}
         fg={color()}
       />
+      <Show when={props.category}>
+        {(category) => (
+          <text content={`(${clip(category(), 64)})`} fg={categoryColor(category(), props.theme)} />
+        )}
+      </Show>
       <Show when={props.view.currentActivity}>
         {(activity) => <text content={activityLabel(activity())} fg={props.theme.textMuted} />}
       </Show>
@@ -125,7 +133,14 @@ export function SidebarObserver(props: SidebarObserverProps): JSX.Element {
       width="100%"
     >
       <For each={visibleViews()}>
-        {(view) => <SubagentCard view={view} config={props.config} theme={props.theme} />}
+        {(view) => (
+          <SubagentCard
+            view={view}
+            config={props.config}
+            theme={props.theme}
+            category={props.categoryFor?.(view.sessionId)}
+          />
+        )}
       </For>
       <Show when={omittedCount() > 0 ? omittedCount() : undefined}>
         {(count) => <text content={`+${count()} omitted`} fg={props.theme.textMuted} />}
