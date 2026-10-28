@@ -9,6 +9,7 @@ import { DEFAULT_OBSERVER_CONFIG, type ObserverConfig } from "../src/subagent-co
 import type { ObserverRegistrySnapshot, SubagentRuntimeView } from "../src/subagent-types";
 import type { ObserverSnapshotReader } from "../src/subagent-snapshot-reader";
 import { SidebarObserver } from "../src/subagent-observer";
+import { AkaneSidebar } from "../src/akane-sidebar";
 
 const color = RGBA.fromHex("#ffffff");
 
@@ -69,6 +70,101 @@ const theme = {
 } satisfies TuiThemeCurrent;
 
 const logger: SubagentLogger = { info: () => {}, warn: () => {}, error: () => {} };
+
+test("renders watchdog information from an available akane state", async () => {
+  const setup = await testRender(
+    () => (
+      <AkaneSidebar
+        state={{
+          version: 1,
+          enabled: true,
+          timestamp: 1,
+          global: { hangupsDetected: 2, pingsSent: 3, recoveries: 1, silencedFailures: 0 },
+          sessions: { root: { state: "WATCHING", runningToolsCount: 1, pendingRequestsCount: 0 } },
+        }}
+        sessionId="root"
+        theme={theme}
+      />
+    ),
+    { width: 64, height: 16 },
+  );
+  try {
+    await setup.renderOnce();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("Akane Watchdog");
+    expect(frame).toContain("Pings: 3");
+    expect(frame).toContain("WATCHING");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("renders the resolved category of a direct child", async () => {
+  const registry = new FakeRegistry({
+    parentSessionId: "root",
+    ready: true,
+    overflowCount: 0,
+    views: [view()],
+  });
+  const setup = await testRender(
+    () => (
+      <SidebarObserver
+        registry={registry}
+        config={config()}
+        sessionId="root"
+        theme={theme}
+        categoryFor={() => "research"}
+      />
+    ),
+    { width: 64, height: 14 },
+  );
+  try {
+    await setup.renderOnce();
+    expect(setup.captureCharFrame()).toContain("research");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
+
+test("renders watchdog location and last activity information", async () => {
+  const setup = await testRender(
+    () => (
+      <AkaneSidebar
+        state={{
+          version: 1,
+          enabled: true,
+          timestamp: 10_000,
+          global: { hangupsDetected: 0, pingsSent: 0, recoveries: 0, silencedFailures: 0 },
+          sessions: {
+            root: {
+              state: "WATCHING",
+              runningToolsCount: 0,
+              pendingRequestsCount: 0,
+              lastActivityAt: 5_000,
+              errorReason: "rate_limit",
+            },
+          },
+        }}
+        sessionId="root"
+        theme={theme}
+        branch="feature"
+        worktree="sample"
+        now={10_000}
+      />
+    ),
+    { width: 64, height: 24 },
+  );
+  try {
+    await setup.renderOnce();
+    const frame = setup.captureCharFrame();
+    expect(frame).toContain("feature");
+    expect(frame).toContain("sample");
+    expect(frame).toContain("5s ago");
+    expect(frame).toContain("rate_limit");
+  } finally {
+    setup.renderer.destroy();
+  }
+});
 
 const source: ObserverEventSource = {
   start: () => {},

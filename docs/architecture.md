@@ -10,7 +10,7 @@ OpenCode EventBus / client / state
   -> SubagentCard list in sidebar_content
 ```
 
-Sibyl v2 の TUI エントリポイントは Observer の初期設定を一度だけ解決し、有効な場合に `sidebar_content` スロットだけを登録します。描画対象はスロットの `session_id` に直接紐づく子セッションです。
+The TUI entry point registers `sidebar_content` and resolves Observer settings once. Akane state gates both watchdog and direct-child displays.
 
 ## コンポーネント
 
@@ -50,12 +50,12 @@ snapshot reader の `omittedCount` は、その snapshot で追跡容量から�
 
 ### `subagent-integration.ts` / `tui.tsx`
 
-Observer が無効な場合は source、Registry、slot を生成しません。有効な場合は OpenCode API から snapshot reader と EventBus source を構成し、`sidebar_content` と lifecycle cleanup だけを登録します。
+The slot is always registered. When the Observer is enabled, integration also constructs a snapshot reader, EventBus source and Registry. The slot polls the akane state and cleans up its timers and subscriptions on disposal.
 
 ## ライフサイクルとクリーンアップ
 
 1. TUI 起動時に Observer 設定を解決します。
-2. 無効なら no-op handle を返します。
+2. 無効なら Observer の source と Registry を生成せず、watchdog の slot を登録します。
 3. 有効なら EventBus source、snapshot reader、Registry を生成します。
 4. `sidebar_content` が親 ID を受け取るたびに Registry がその親を選択します。
 5. `api.lifecycle.onDispose()` から Registry の停止を await します。
@@ -75,7 +75,7 @@ Observer はプロセスを生成しないため、PTY や shell の終了処理
 - OpenTUI の `sidebar_content` slot API に依存します。
 - 状態や Message の利用可能性は OpenCode host の EventBus、client、state API に依存します。
 - Model、Provider、最新テキスト、公開 reasoning summary は入力データに存在しない場合は表示されません。
-- Akane 連携は現行 Observer の範囲外です。
+- Akane publishes a versioned local state file; the TUI reads it and hides both views when it is unavailable or stale. Akane owns monitoring and recovery.
 
 ## v1 との関係
 

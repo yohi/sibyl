@@ -1,6 +1,8 @@
 # Sibyl v2 Observer
 
-Sibyl は OpenCode TUI の `sidebar_content` に、現在の親セッションから直接生成された子セッションを表示する読み取り専用 Observer プラグインです。
+Sibyl is a read-only OpenCode TUI plugin displaying akane watchdog status and direct child sessions. It requires an active akane server plugin.
+
+The former `@yohi/akane/tui` entry has moved to `@yohi/sibyl/tui`. Remove the former TUI registration, register both `@yohi/akane` as a server plugin and `@yohi/sibyl/tui` as a TUI plugin, and restart OpenCode. The sidebar is hidden while akane's versioned state is unavailable or stale. See [SPEC.md](./SPEC.md) for the contract.
 
 Observer はデフォルトで無効です。有効化しても、セッションの作成・編集・削除、プロンプト送信、権限変更、モデル変更、PTY 起動、シェル起動は行いません。
 
@@ -96,7 +98,7 @@ Observer が保持・表示するのは安全投影済みの次の情報だけ�
 - Observer は OpenCode の EventBus と既存の client/state API を読み取るだけです。
 - Sibyl の route、keymap、layout controller、pane backend、PTY、shell、attach process は Observer 経路にありません。
 - 旧設定値を検出した場合は起動ごとに 1 回だけ警告し、Observer 設定には取り込みません。
-- Akane はロード、設定、参照、描画しません。
+- Akane の状態を読み取って表示しますが、監視や復旧は Akane が担います。
 
 ## 開発
 

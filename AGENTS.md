@@ -1,7 +1,8 @@
 # AGENTS.md — Sibyl
 
-Sibyl gives operators a read-only, secret-safe overview of the active OpenCode
-session's direct child agent sessions inside the `sidebar_content` slot. It does
+Sibyl gives operators a read-only, secret-safe overview of akane watchdog status
+and the active OpenCode session's direct child agent sessions inside the
+`sidebar_content` slot. The display requires a current akane state file. It does
 not create sessions, send prompts, manage models, register routes or keymaps, or
 spawn PTYs, shells, or attach processes.
 

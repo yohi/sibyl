@@ -75,7 +75,13 @@ describe("published package entrypoints", () => {
         "@opentui/solid/preload",
         "-e",
         `import { RGBA } from "@opentui/core";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { testRender } from "@opentui/solid";
+const directory = mkdtempSync(join(tmpdir(), "sibyl-published-"));
+mkdirSync(join(directory, ".akane"));
+writeFileSync(join(directory, ".akane", "watchdog-state.json"), JSON.stringify({version: 1, enabled: true, timestamp: Date.now(), global: {hangupsDetected: 0, pingsSent: 0, recoveries: 0, silencedFailures: 0}, sessions: {}}));
 const { attachSubagentIntegration, createTuiPlugin } = await import("./dist/tui.js");
 const color = RGBA.fromHex("#ffffff");
 const theme = { error: color, warning: color, info: color, success: color, text: color, textMuted: color, backgroundPanel: color };
@@ -102,7 +108,7 @@ let handle;
 const api = {
   client: {},
   event: { on() { return () => {}; } },
-  state: { config: {}, session: { get() {}, messages() { return []; }, status() {} }, part() { return []; } },
+  state: { path: {directory, worktree: directory}, config: {}, session: { get() {}, messages() { return []; }, status() {} }, part() { return []; } },
   theme: { current: theme },
   slots: { register(plugin) { registrations.push(plugin); return "registration-1"; } },
   lifecycle: { signal: new AbortController().signal, onDispose(fn) { disposers.push(fn); return () => {}; } },
@@ -117,7 +123,7 @@ const tui = createTuiPlugin({
 await Reflect.apply(tui, undefined, [api, undefined, undefined]);
 const slot = registrations[0]?.slots.sidebar_content;
 if (!slot) throw new Error("Missing sidebar_content slot");
-const setup = await testRender(() => slot({ theme: api.theme }, { session_id: "parent-1" }), { width: 40, height: 8 });
+const setup = await testRender(() => slot({ theme: api.theme }, { session_id: "parent-1" }), { width: 40, height: 30 });
 await setup.renderOnce();
 await Promise.resolve();
 await Promise.resolve();
@@ -125,6 +131,7 @@ await setup.renderOnce();
 const frame = setup.captureCharFrame();
 setup.renderer.destroy();
 await handle.stop();
+rmSync(directory, {recursive: true, force: true});
 if (!frame.includes("explore")) throw new Error("Missing child agent in frame");
 if (!frame.includes("BUSY")) throw new Error("Missing child status in frame");`,
       ],
