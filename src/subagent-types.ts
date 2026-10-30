@@ -7,6 +7,7 @@ export interface SafeSessionProjection {
   readonly parentSessionId?: string;
   readonly createdAt: number;
   readonly updatedAt: number;
+  readonly category?: string;
 }
 
 export type SafeModelCandidate =
@@ -26,6 +27,7 @@ export type SafeMessageProjection =
       readonly sessionId: string;
       readonly role: "assistant";
       readonly createdAt: number;
+      readonly agentName?: string;
       readonly completedAt?: number;
       readonly hasError: boolean;
     } & SafeModelCandidate);
@@ -41,6 +43,7 @@ export interface SubagentRuntimeView {
   readonly sessionId: string;
   readonly parentSessionId: string;
   readonly agentName: string;
+  readonly category?: string;
   readonly providerId?: string;
   readonly modelId?: string;
   readonly status: ObserverRuntimeStatus;

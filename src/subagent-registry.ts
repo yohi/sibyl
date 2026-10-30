@@ -46,7 +46,6 @@ interface TrackedChild {
   parts: Map<string, SafePartProjection>;
   updatedAt: number;
   lastSequence: number;
-  messageError: boolean;
   retentionDeadline: number | undefined;
   retentionTimer: RegistryTimer | undefined;
 }
@@ -279,7 +278,13 @@ function toRuntimeView(child: TrackedChild, activityLimit: number): SubagentRunt
       isSubtaskPart(part) && part.agent !== "unknown",
   );
   const userMessage = newerUserMessage(child.messages.values());
-  const agentName = agentPart?.name ?? subtaskPart?.agent ?? userMessage?.agentName ?? "unknown";
+  const assistantMessage = newerMessage(child.messages.values(), "assistant");
+  const agentName =
+    agentPart?.name ??
+    subtaskPart?.agent ??
+    (assistantMessage?.role === "assistant" ? assistantMessage.agentName : undefined) ??
+    userMessage?.agentName ??
+    "unknown";
   const model =
     newestAssistantWithModel(child.messages.values()) ??
     newestUserWithModel(child.messages.values());
@@ -297,6 +302,7 @@ function toRuntimeView(child: TrackedChild, activityLimit: number): SubagentRunt
     sessionId: child.session.id,
     parentSessionId: child.session.parentSessionId ?? "",
     agentName,
+    ...(child.session.category === undefined ? {} : { category: child.session.category }),
     ...(model === undefined ? {} : model),
     status: child.status,
     createdAt: child.session.createdAt,
@@ -315,13 +321,6 @@ function newerUserMessage(
   return message?.role === "user" ? message : undefined;
 }
 
-function hasAssistantError(messages: Iterable<SafeMessageProjection>): boolean {
-  for (const message of messages) {
-    if (message.role === "assistant" && message.hasError) return true;
-  }
-  return false;
-}
-
 function createTrackedChild(child: HydratedSubagent): TrackedChild {
   const messages = new Map<string, SafeMessageProjection>();
   for (const message of child.messages) messages.set(message.id, message);
@@ -329,12 +328,11 @@ function createTrackedChild(child: HydratedSubagent): TrackedChild {
   for (const part of child.parts) parts.set(part.partId, part);
   return {
     session: child.session,
-    status: hasAssistantError(messages.values()) ? "error" : child.status,
+    status: child.status,
     messages,
     parts,
     updatedAt: child.session.updatedAt,
     lastSequence: 0,
-    messageError: hasAssistantError(messages.values()),
     retentionDeadline: undefined,
     retentionTimer: undefined,
   };
@@ -689,14 +687,9 @@ export class SubagentRegistry {
         break;
       case "message.upsert":
         child.messages.set(event.message.id, event.message);
-        if (event.message.role === "assistant" && event.message.hasError) {
-          child.messageError = true;
-          this.applyStatus(child, "error", event.observedAt);
-        }
         break;
       case "message.removed":
         this.removeMessage(child, event.messageId);
-        child.messageError = hasAssistantError(child.messages.values());
         break;
       case "part.upsert":
         child.parts.set(event.part.partId, event.part);
@@ -756,7 +749,6 @@ export class SubagentRegistry {
     observedAt: number,
   ): void {
     child.status = status;
-    child.messageError = status === "error" ? child.messageError : false;
     if (status === "idle") {
       if (this.deps.config.idleRetentionMs === 0) {
         this.removeTracked(child.session.id);
@@ -802,7 +794,6 @@ export class SubagentRegistry {
       parts: new Map(),
       updatedAt: Math.max(session.updatedAt, observedAt),
       lastSequence: 0,
-      messageError: false,
       retentionDeadline: undefined,
       retentionTimer: undefined,
     };
@@ -957,8 +948,6 @@ export class SubagentRegistry {
       message.sessionId === child.session.id
     ) {
       child.messages.set(message.id, message);
-      child.messageError = message.role === "assistant" && message.hasError;
-      if (child.messageError) child.status = "error";
     }
     for (const part of parts) {
       if (part.sessionId === child.session.id && part.messageId === messageId) {

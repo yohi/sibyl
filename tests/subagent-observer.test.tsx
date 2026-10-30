@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui";
+import type { SidebarTheme as TuiThemeCurrent } from "../src/sidebar-theme";
 import { RGBA } from "@opentui/core";
 import { testRender } from "@opentui/solid";
 import type { SubagentLogger } from "../src/subagent-logger";

@@ -21,7 +21,7 @@ This document expands on the non-negotiable conventions referenced from [AGENTS.
 
 - The Observer owns no processes. Registry stop must abort reads and refreshes, clear retention timers, unsubscribe handlers, and stop the event source idempotently.
 - Inside the legacy generic PTY modules, every spawned PTY keeps a guaranteed cleanup path through `PtyTerminator` / `PtyManager`.
-- Wire disposal through OpenCode `onDispose` hooks.
+- The V2 plugin's `setup()` cleanup owns the slot disposer and awaits all mounted sidebar cleanups. Sidebar components own their V2 data listener, AbortControllers, timers, Registry, and reconciler.
 
 ## Git Workflow
 

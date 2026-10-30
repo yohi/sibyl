@@ -1,17 +1,12 @@
 import {
   CORRELATION_ID_LIMIT,
   DISPLAY_IDENTIFIER_LIMIT,
-  LATEST_TEXT_LIMIT,
-  REASONING_SUMMARY_LIMIT,
   TOOL_NAME_LIMIT,
   redactAndTruncate,
 } from "./subagent-redaction.js";
 import type {
   ObserverRuntimeStatus,
-  ObserverToolState,
-  ObserverToolActivity,
   SafeMessageProjection,
-  SafePartProjection,
   SafeSessionProjection,
 } from "./subagent-types.js";
 
@@ -55,9 +50,13 @@ export function projectSession(value: unknown): SafeSessionProjection | undefine
   const parentValue = value.parentID;
   const parentSessionId = parentValue === undefined ? undefined : safeCorrelationId(parentValue);
   if (parentValue !== undefined && parentSessionId === undefined) return undefined;
-  return parentSessionId === undefined
-    ? { id, createdAt, updatedAt }
-    : { id, parentSessionId, createdAt, updatedAt };
+  const match =
+    typeof value.title === "string"
+      ? /^\[([A-Za-z0-9][A-Za-z0-9_-]{0,63})\]\s/u.exec(value.title)
+      : null;
+  const category = safeDisplayIdentifier(match?.[1]);
+  const base = { id, createdAt, updatedAt, ...(category === undefined ? {} : { category }) };
+  return parentSessionId === undefined ? base : { ...base, parentSessionId };
 }
 
 export function normalizeRuntimeStatus(value: unknown): ObserverRuntimeStatus {
@@ -96,16 +95,19 @@ function withModel<T extends object>(
   base: T,
   provider: unknown,
   model: unknown,
-): T & { readonly providerId?: string; readonly modelId?: string } {
+): T | (T & { readonly providerId: string; readonly modelId: string }) {
   const candidate = modelCandidate(provider, model);
   return candidate === undefined ? base : { ...base, ...candidate };
 }
 
-export function projectMessage(value: unknown): SafeMessageProjection | undefined {
+export function projectMessage(
+  value: unknown,
+  ownerSessionId: string,
+): SafeMessageProjection | undefined {
   if (!isRecord(value)) return undefined;
   const id = safeCorrelationId(value.id);
-  const sessionId = safeCorrelationId(value.sessionID);
-  const role = value.role;
+  const sessionId = safeCorrelationId(ownerSessionId);
+  const role = value.type;
   const time = isRecord(value.time) ? value.time : undefined;
   const createdAt = finiteNumber(time?.created);
   if (id === undefined || sessionId === undefined || createdAt === undefined) return undefined;
@@ -117,13 +119,13 @@ export function projectMessage(value: unknown): SafeMessageProjection | undefine
       {
         id,
         sessionId,
-        role: "user",
+        role: "user" as const,
         createdAt,
         agentName,
       },
       model?.providerID,
       model?.modelID,
-    ) as SafeMessageProjection;
+    );
   }
 
   if (role !== "assistant") return undefined;
@@ -133,125 +135,12 @@ export function projectMessage(value: unknown): SafeMessageProjection | undefine
     sessionId,
     role: "assistant" as const,
     createdAt,
+    ...(safeDisplayIdentifier(value.agent) === undefined
+      ? {}
+      : { agentName: safeDisplayIdentifier(value.agent) }),
     ...(completedAt === undefined ? {} : { completedAt }),
     hasError: Object.hasOwn(value, "error") && value.error !== undefined && value.error !== null,
   };
-  return withModel(base, value.providerID, value.modelID) as SafeMessageProjection;
-}
-
-export interface ProjectPartContext {
-  readonly messageRole: "user" | "assistant" | undefined;
-  readonly observedAt: number;
-}
-
-function partIdentifiers(
-  value: RecordValue,
-  allowToolFallback = false,
-): { readonly sessionId: string; readonly messageId: string; readonly partId: string } | undefined {
-  const sessionId = safeCorrelationId(value.sessionID);
-  const messageId = safeCorrelationId(value.messageID);
-  const rawPartId = value.id;
-  const partId =
-    safeCorrelationId(rawPartId) ??
-    (allowToolFallback && rawPartId === undefined ? safeCorrelationId(value.callID) : undefined);
-  if (sessionId === undefined || messageId === undefined || partId === undefined) return undefined;
-  return { sessionId, messageId, partId };
-}
-
-function observedTime(value: unknown, fallback: number): number {
-  return finiteNumber(value) ?? fallback;
-}
-
-function projectTool(
-  value: RecordValue,
-  identifiers: { readonly sessionId: string; readonly messageId: string; readonly partId: string },
-  context: ProjectPartContext,
-): SafePartProjection | undefined {
-  if (!isRecord(value.state)) return undefined;
-  const state = value.state;
-  const stateName = state.status;
-  let toolState: ObserverToolState;
-  let updatedAt = context.observedAt;
-  switch (stateName) {
-    case "pending":
-      toolState = "pending";
-      break;
-    case "running":
-      toolState = "running";
-      updatedAt = observedTime(isRecord(state.time) ? state.time.start : undefined, updatedAt);
-      break;
-    case "completed":
-      toolState = "completed";
-      updatedAt = observedTime(isRecord(state.time) ? state.time.end : undefined, updatedAt);
-      break;
-    case "error":
-      toolState = "error";
-      updatedAt = observedTime(isRecord(state.time) ? state.time.end : undefined, updatedAt);
-      break;
-    default:
-      return undefined;
-  }
-
-  const activity: ObserverToolActivity = {
-    id: identifiers.partId,
-    toolName: safeToolName(value.tool),
-    state: toolState,
-    updatedAt,
-  };
-  return { kind: "tool", ...identifiers, activity };
-}
-
-export function projectPart(
-  value: unknown,
-  context: ProjectPartContext,
-): SafePartProjection | undefined {
-  if (!isRecord(value)) return undefined;
-  const type = value.type;
-  const identifiers = partIdentifiers(value, type === "tool");
-  if (identifiers === undefined) return undefined;
-
-  if (type === "agent") {
-    return {
-      kind: "agent",
-      ...identifiers,
-      name: safeDisplayIdentifier(value.name) ?? "unknown",
-      observedAt: context.observedAt,
-    };
-  }
-  if (type === "subtask") {
-    return {
-      kind: "subtask",
-      ...identifiers,
-      agent: safeDisplayIdentifier(value.agent) ?? "unknown",
-      observedAt: context.observedAt,
-    };
-  }
-  if (type === "text") {
-    if (context.messageRole !== "assistant" || typeof value.text !== "string") return undefined;
-    return {
-      kind: "assistant-text",
-      ...identifiers,
-      text: redactAndTruncate(value.text, LATEST_TEXT_LIMIT),
-      observedAt: context.observedAt,
-    };
-  }
-  if (type === "reasoning") {
-    if (value.summaryVisibility !== "public" || typeof value.publicSummary !== "string") {
-      return undefined;
-    }
-    return {
-      kind: "public-reasoning-summary",
-      ...identifiers,
-      text: redactAndTruncate(value.publicSummary, REASONING_SUMMARY_LIMIT),
-      observedAt: context.observedAt,
-    };
-  }
-  if (type === "tool") return projectTool(value, identifiers, context);
-  return undefined;
-}
-
-export function readPartIdentifiers(
-  value: unknown,
-): { readonly sessionId: string; readonly messageId: string; readonly partId: string } | undefined {
-  return isRecord(value) ? partIdentifiers(value) : undefined;
+  const model = isRecord(value.model) ? value.model : undefined;
+  return withModel(base, model?.providerID ?? value.providerID, model?.id ?? value.modelID);
 }

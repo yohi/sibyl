@@ -1,4 +1,4 @@
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui";
+import type { SidebarTheme as TuiThemeCurrent } from "./sidebar-theme.js";
 import type { RGBA } from "@opentui/core";
 import { Show } from "solid-js";
 import type { AkaneState } from "./akane-state.js";

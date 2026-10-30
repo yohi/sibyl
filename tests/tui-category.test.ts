@@ -2,7 +2,6 @@ import { describe, expect, it } from "bun:test";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ToolPart } from "@opencode-ai/sdk/v2";
 import { categoryColor, createCategoryResolver, type CategorySession } from "../src/tui-category";
 
 const theme = {
@@ -198,7 +197,7 @@ describe("category resolver", () => {
       messageID: "message",
       type: "tool",
       callID: "call",
-      tool: "task",
+      name: "task",
       state: {
         status: "completed",
         input: { category: "quick", description: "local category verification" },
@@ -207,7 +206,7 @@ describe("category resolver", () => {
         metadata: { category: "quick" },
         time: { start: 0, end: 1 },
       },
-    } satisfies ToolPart;
+    };
 
     expect(
       resolver.resolve(

@@ -1,14 +1,22 @@
-# Sibyl v2 Observer
+# Sibyl
 
-Sibyl is a read-only OpenCode TUI plugin displaying akane watchdog status and direct child sessions. It requires an active akane server plugin.
+Sibyl is a read-only OpenCode V2 TUI plugin for viewing Akane watchdog status
+and the current session's direct child sessions.
 
-The former `@yohi/akane/tui` entry has moved to `@yohi/sibyl/tui`. Remove the former TUI registration, register both `@yohi/akane` as a server plugin and `@yohi/sibyl/tui` as a TUI plugin, and restart OpenCode. The sidebar is hidden while akane's versioned state is unavailable or stale. See [SPEC.md](./SPEC.md) for the contract.
+## Requirements
 
-Observer はデフォルトで無効です。有効化しても、セッションの作成・編集・削除、プロンプト送信、権限変更、モデル変更、PTY 起動、シェル起動は行いません。
+- OpenCode `2.1.4` or newer in the V2 major line (`>=2.1.4 <3`).
+- An Akane V2 server plugin that writes the versioned
+  `.akane/watchdog-state.json` file.
+- Bun for local development and tests.
 
-## インストール
+The `master` branch retains the OpenCode V1 implementation. This branch targets
+V2 and does not provide V1 adapters. The current candidate is
+`@yohi/sibyl@3.0.0-alpha.1`.
 
-Akane の server プラグインは `opencode.json` に登録します。
+## Install
+
+Register the Akane server plugin in `opencode.json`:
 
 ```json
 {
@@ -16,59 +24,60 @@ Akane の server プラグインは `opencode.json` に登録します。
 }
 ```
 
-Sibyl の TUI プラグインは `tui.json` に登録します。
+Register Sibyl's TUI plugin in the terminal configuration at
+`$XDG_CONFIG_HOME/opencode/cli.json` (normally
+`~/.config/opencode/cli.json`):
 
 ```json
 {
-  "plugin": ["@yohi/sibyl/tui"]
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": ["@yohi/sibyl"]
 }
 ```
 
-旧 `@yohi/akane/tui` の登録を削除し、OpenCode を再起動してください。
+The V2 TUI loader resolves the `./tui` package export. Remove the old
+`@yohi/akane/tui` entry and restart OpenCode.
 
-## Observer 設定
+## Configure
 
-ホスト設定では `sibyl.observer` に設定します。プラグインオプションを使う場合は `observer` オブジェクトを渡します。
+Observer options belong to Sibyl's plugin entry, not a top-level `sibyl` host
+configuration block. The Observer is disabled by default:
 
-```jsonc
+```json
 {
-  "sibyl": {
-    "observer": {
-      "enabled": false,
-      "maxVisibleSubagents": 8,
-      "maxTrackedSubagents": 64,
-      "activityLimit": 5,
-      "idleRetentionMs": 300000,
-      "showModel": true,
-      "showProvider": true,
-      "showLatestText": true,
-      "showReasoningSummary": true
+  "$schema": "https://opencode.ai/v2/cli.json",
+  "plugins": [
+    {
+      "package": "@yohi/sibyl",
+      "options": {
+        "observer": {
+          "enabled": true,
+          "maxVisibleSubagents": 8,
+          "maxTrackedSubagents": 64,
+          "activityLimit": 5,
+          "idleRetentionMs": 300000,
+          "showModel": true,
+          "showProvider": true,
+          "showLatestText": true,
+          "showReasoningSummary": true
+        }
+      }
     }
-  }
+  ]
 }
 ```
 
-| 項目 | デフォルト | 有効範囲 |
-| --- | ---: | --- |
-| `enabled` | `false` | `true` / `false` |
-| `maxVisibleSubagents` | `8` | `1`〜`8` |
-| `maxTrackedSubagents` | `64` | `8`〜`256`。表示数以上 |
-| `activityLimit` | `5` | `1`〜`20` |
-| `idleRetentionMs` | `300000` | `0`〜`3600000` |
-| `showModel` | `true` | `true` / `false` |
-| `showProvider` | `true` | `true` / `false` |
-| `showLatestText` | `true` | `true` / `false` |
-| `showReasoningSummary` | `true` | `true` / `false` |
-
-値は項目ごとに次の順で解決されます。
+Each setting can be overridden with its `SIBYL_OBSERVER_*` environment
+variable. Precedence is:
 
 ```text
-環境変数 > TUI pluginOptions.observer > sibyl.observer > デフォルト値
+environment > plugin options > defaults
 ```
 
-環境変数は次の 9 個です。
+An invalid selected value rejects plugin setup rather than falling through.
+See [SPEC.md](SPEC.md) for defaults, ranges, and the complete safety contract.
 
-| 項目 | 環境変数 |
+| Option | Environment variable |
 | --- | --- |
 | `enabled` | `SIBYL_OBSERVER_ENABLED` |
 | `maxVisibleSubagents` | `SIBYL_OBSERVER_MAX_VISIBLE_SUBAGENTS` |
@@ -80,35 +89,22 @@ Sibyl の TUI プラグインは `tui.json` に登録します。
 | `showLatestText` | `SIBYL_OBSERVER_SHOW_LATEST_TEXT` |
 | `showReasoningSummary` | `SIBYL_OBSERVER_SHOW_REASONING_SUMMARY` |
 
-環境変数の真偽値は `true` / `false` または `1` / `0`、整数値は 10 進整数です。選択された値が不正な場合、下位の設定へフォールバックせず起動を拒否します。
+## Privacy and scope
 
-## 表示内容とプライバシー
+Sibyl reads public V2 session/message/event data, the selected session's Akane
+state, and optional safe category labels from existing task/team runtime
+records. It displays only the current session's direct children. It does not
+create or mutate sessions, send prompts, change permissions or models, start
+processes, or register routes/keymaps.
 
-Observer が保持・表示するのは安全投影済みの次の情報だけです。
+Text is redacted before truncation. Tool inputs, outputs, errors, metadata,
+attachments, credentials, and raw reasoning are never retained or rendered.
+OpenCode `2.1.4` has no verified public reasoning-summary field, so
+`showReasoningSummary` is accepted but no reasoning content is displayed.
+If Akane state is missing, disabled, malformed, or stale, the sidebar is
+hidden.
 
-- 直接の子セッションの安全な ID、親 ID、作成時刻、更新時刻
-- 状態（`busy`、`idle`、`retry`、`error`、`unknown`）
-- Agent 名、Provider 名、Model 名
-- 最新の Assistant テキスト
-- 公開設定された reasoning summary
-- 現在および最近の Tool 名と状態（`pending`、`running`、`completed`、`error`）
-カードは状態の緊急度（`error` > `retry` > `busy` > `idle` > `unknown`）、同順位は最近の活動が新しい順に並びます。現在の活動は `running` を最優先し、次に `pending` を選択します。完了・失敗した Tool は `activityLimit` 件までの履歴にだけ残ります。
-
-表示テキストは機密情報を置換してから長さ制限を適用します。置換文字列は常に `[redacted]` で、名前付き secret → 認証 scheme → 既知 token 形式 → 機密環境変数代入 → 切り詰め の固定順序で決定論的に適用します。既定上限は最新テキストと reasoning summary が 160 文字、識別子と Tool 名が 64 文字、相関 ID が 128 文字です。生の reasoning、Tool の入力・出力・エラー・タイトル、添付ファイル、メタデータ、環境変数、認証情報、API キーは投影・保存・描画しません。
-
-セッション ID、メッセージ ID、Part ID、Agent 名、Provider 名、Model 名、Tool 名は長さと文字種を検証し、安全な値だけを保持します。無効な Tool 名は `unknown` として扱われます。
-
-## Observer の境界
-
-- 現在 `sidebar_content` に渡された `session_id` と `parentID` が完全一致する子だけを追跡します。
-- 孫セッションを再帰的に追跡しません。
-- 表示順と状態は `SubagentRegistry` が管理します。
-- Observer は OpenCode の EventBus と既存の client/state API を読み取るだけです。
-- Sibyl の route、keymap、layout controller、pane backend、PTY、shell、attach process は Observer 経路にありません。
-- 旧設定値を検出した場合は起動ごとに 1 回だけ警告し、Observer 設定には取り込みません。
-- Akane の状態を読み取って表示しますが、監視や復旧は Akane が担います。
-
-## 開発
+## Development
 
 ```bash
 bun install
@@ -118,4 +114,5 @@ bun run test
 bun run build
 ```
 
-詳細な契約は [SPEC.md](./SPEC.md)、実装構造は [docs/architecture.md](./docs/architecture.md)、移行履歴は [CHANGELOG.md](./CHANGELOG.md) を参照してください。
+See [architecture](docs/architecture.md), [migration evidence](docs/migration.md),
+and [CHANGELOG](CHANGELOG.md).

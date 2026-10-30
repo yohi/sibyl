@@ -1,11 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
-import type { Part } from "@opencode-ai/sdk/v2";
-
-export type CategorySession = Pick<
-  import("@opencode-ai/sdk/v2").Session,
-  "id" | "parentID" | "title"
->;
+export type CategorySession = {
+  readonly id: string;
+  readonly parentID?: string;
+  readonly title: string;
+};
 
 export type CategorySource = "task-record" | "team-runtime" | "parent-history" | "event" | "title";
 
@@ -31,7 +30,7 @@ export type CategoryTheme<TColor> = Readonly<Record<CategoryColorName, TColor>>;
 
 export interface CategoryResolver {
   readonly refresh: (directories: CategoryDirectories) => void;
-  readonly resolve: (session: CategorySession, parentParts?: readonly Part[]) => CategoryResult;
+  readonly resolve: (session: CategorySession, parentParts?: readonly unknown[]) => CategoryResult;
   readonly observeToolCall: (
     parentID: string,
     tool: string,
@@ -125,10 +124,17 @@ function titleCategory(title: string): string | undefined {
 
 function categoryFromParentParts(
   session: CategorySession,
-  parentParts: readonly Part[],
+  parentParts: readonly unknown[],
 ): CategoryResult | undefined {
   const candidates = parentParts.flatMap((part) => {
-    if (part.type !== "tool" || part.tool !== "task") return [];
+    if (
+      !isRecord(part) ||
+      part.type !== "tool" ||
+      part.name !== "task" ||
+      !isRecord(part.state) ||
+      !isRecord(part.state.input)
+    )
+      return [];
     const inputCategory = parseCategory(part.state.input["category"]);
     const metadata =
       "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : undefined;
