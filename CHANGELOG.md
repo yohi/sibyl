@@ -1,5 +1,15 @@
 # Changelog
 
+## [3.0.1](https://github.com/yohi/sibyl/compare/v3.0.0...v3.0.1) (2026-10-30)
+
+
+### Bug Fixes
+
+* PR失敗checkの原因を修正 ([5e35978](https://github.com/yohi/sibyl/commit/5e35978f6ddcd919e59db70c042eb24d8fe65a52))
+* SonarCloudの信頼性指摘を解消 ([2c5130a](https://github.com/yohi/sibyl/commit/2c5130ac1e10d4fe3f2abc80e889160d9c96eac5))
+* SonarCloudの複雑度指摘を解消 ([b9f815d](https://github.com/yohi/sibyl/commit/b9f815dd2fd111139dfbf5880a83bbc1e8f84c81))
+* V2イベント更新と子セッション取得を安定化 ([9e79d91](https://github.com/yohi/sibyl/commit/9e79d916c69ad49486ebeb0f30f8c841c7fff2cf))
+
 ## [2.0.0](https://github.com/yohi/sibyl/compare/v1.1.0...v2.0.0) (2026-08-23)
 
 
