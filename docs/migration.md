@@ -31,6 +31,10 @@ acceptance.
   Confirm it writes schema version `1` state for the selected session/project;
   exercise missing, disabled, malformed, stale, future-dated, recovery, and
   cross-location cases. A synthetic state fixture does not satisfy this item.
+  **Blocked:** the latest public Akane release (`2.0.0`) still declares
+  `@opencode-ai/plugin@^1.18.25`; its V2 work is not available yet, and the
+  repository currently has no open pull request for that migration. Do not use
+  the V1 package as a substitute in the V2 host.
 - [ ] **Exercise live child activity in OpenCode `2.1.4`.** Create a child using
   the host UI, observe start/tool/retry/success/failure updates, then switch and
   move the parent session and unload the plugin. Confirm no stale child or
