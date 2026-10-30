@@ -69,6 +69,7 @@ export function SidebarV2(props: {
     backgroundPanel: context.theme.background.raised.base,
   });
   const unsubscribe = context.data.listen(({ details }) => {
+    let categoryChanged = false;
     switch (details.type) {
       case "session.tool.input.started":
         if (toolNames.size >= 256) {
@@ -84,6 +85,7 @@ export function SidebarV2(props: {
           details.data.input,
           details.data.id,
         );
+        categoryChanged = true;
         break;
       case "session.tool.success":
       case "session.tool.failed":
@@ -93,9 +95,11 @@ export function SidebarV2(props: {
           details.type === "session.tool.success" ? "success" : "failure",
         );
         toolNames.delete(details.data.id);
+        categoryChanged = true;
         break;
       case "session.deleted":
         category.evict(details.data.sessionID);
+        categoryChanged = true;
         if (details.data.sessionID === props.sessionId)
           setLocationVersion((version) => version + 1);
         break;
@@ -104,7 +108,7 @@ export function SidebarV2(props: {
           setLocationVersion((version) => version + 1);
         break;
     }
-    setCategoryVersion((version) => version + 1);
+    if (categoryChanged) setCategoryVersion((version) => version + 1);
   });
   const categoryFor = (id: string): string | undefined => {
     categoryVersion();

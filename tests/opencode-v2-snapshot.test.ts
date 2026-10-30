@@ -25,6 +25,46 @@ test("selects busy direct children across paginated session results", async () =
   expect(snapshot.omittedCount).toBe(1);
 });
 
+test("keeps hydrated children when another child's messages fail", async () => {
+  const reader = createV2SnapshotReader({
+    list: async () => ({
+      data: [makeSession({ id: "ses_failed" }), makeSession({ id: "ses_ok" })],
+      cursor: {},
+    }),
+    active: async () => ({}),
+    messages: async (sessionId) => {
+      if (sessionId === "ses_failed") throw new Error("message request failed");
+      return { data: [makeAssistant()] };
+    },
+    message: async () => makeAssistant(),
+  });
+
+  const snapshot = await reader.readParent(
+    "ses_parent",
+    DEFAULT_OBSERVER_CONFIG,
+    new AbortController().signal,
+  );
+
+  expect(snapshot.children.map((child) => child.session.id)).toEqual(["ses_ok"]);
+});
+
+test("rethrows cancellation while hydrating children", async () => {
+  const controller = new AbortController();
+  const reader = createV2SnapshotReader({
+    list: async () => ({ data: [makeSession()], cursor: {} }),
+    active: async () => ({}),
+    messages: async () => {
+      controller.abort();
+      return { data: [] };
+    },
+    message: async () => makeAssistant(),
+  });
+
+  await expect(
+    reader.readParent("ses_parent", DEFAULT_OBSERVER_CONFIG, controller.signal),
+  ).rejects.toMatchObject({ name: "AbortError" });
+});
+
 test("resolves the selected session location instead of the host default", async () => {
   const session = makeSession({ location: { directory: "/project/child" } });
   let requested = "";

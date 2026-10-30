@@ -186,19 +186,23 @@ async function hydrateCandidates(
   candidates: readonly Candidate[],
   signal: AbortSignal,
 ): Promise<readonly HydratedSubagent[]> {
-  const children: HydratedSubagent[] = [];
+  const children: Array<HydratedSubagent | undefined> = [];
   let index = 0;
   await Promise.all(
     Array.from({ length: Math.min(8, candidates.length) }, async () => {
       while (index < candidates.length) {
         const current = index++;
         const candidate = candidates[current];
-        if (candidate !== undefined)
+        if (candidate === undefined) continue;
+        try {
           children[current] = await hydrateCandidate(client, candidate, signal);
+        } catch {
+          signal.throwIfAborted();
+        }
       }
     }),
   );
-  return children;
+  return children.flatMap((child) => (child === undefined ? [] : [child]));
 }
 
 export async function readSessionLocation(
