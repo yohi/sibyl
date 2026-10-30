@@ -5,8 +5,8 @@ and the active OpenCode session's direct child agent sessions inside the V2
 `sidebar.content` slot. This branch targets OpenCode `>=2.1.4 <3`; `master`
 retains the V1 implementation. The display requires a current Akane state file.
 It does not create sessions, send prompts, manage models, register routes or
-keymaps, or spawn PTYs, shells, or attach processes. Alpha verification evidence
-and known API limitations are tracked in `docs/migration.md`.
+keymaps, or spawn PTYs, shells, or attach processes. V2 acceptance evidence and
+known API limitations are tracked in `docs/migration.md`.
 
 ## Stack
 
@@ -35,6 +35,6 @@ conventions and implementation rules live in those files, not here.
   bounded-state contract, current limitations.
 - `docs/WORKING_RULES.md` — coding, testing, cleanup, and Git conventions.
 - `CHANGELOG.md` — release history and migration context.
-- `docs/migration.md` — OpenCode V2 alpha acceptance evidence and known limitations.
+- `docs/migration.md` — OpenCode V2 acceptance evidence and known limitations.
 
 Let Biome enforce style and formatting. Do not ask the agent to act as a linter.

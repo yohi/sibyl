@@ -11,8 +11,8 @@ and the current session's direct child sessions.
 - Bun for local development and tests.
 
 The `master` branch retains the OpenCode V1 implementation. This branch targets
-V2 and does not provide V1 adapters. The current candidate is
-`@yohi/sibyl@3.0.0-alpha.1`.
+V2 and does not provide V1 adapters. The current stable package is
+`@yohi/sibyl@3.0.0`.
 
 ## Install
 

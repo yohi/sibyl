@@ -20,11 +20,11 @@
 * Observerのイベント処理とペイン比率を修正 ([bf8da2d](https://github.com/yohi/sibyl/commit/bf8da2d5e4e4edf7780fe5e6f71fa03b63f88bca))
 * スナップショットIDの並び順を安定化 ([b988fe5](https://github.com/yohi/sibyl/commit/b988fe5113446bf0e4204476f0719fd69d94f0af))
 * 公開API変更に合わせてメジャーバージョンを更新 ([2a77433](https://github.com/yohi/sibyl/commit/2a774337e995668c614b2577dbb41bf4ac7552c9))
-## [3.0.0-alpha.1](https://github.com/yohi/sibyl/compare/v2.0.0...v3.0.0-alpha.1) (2026-10-30)
+## [3.0.0](https://github.com/yohi/sibyl/compare/v2.0.0...v3.0.0) (2026-10-30)
 
 ### Breaking Changes
 
-* Replaced the OpenCode V1 TUI entry and host adapters with the V2 `Plugin.define` API, `sidebar.content` slot, V2 session/message schemas, and V2 event listener. This alpha supports OpenCode `>=2.1.4 <3`; `master` retains the V1 implementation.
+* Replaced the OpenCode V1 TUI entry and host adapters with the V2 `Plugin.define` API, `sidebar.content` slot, V2 session/message schemas, and V2 event listener. This release supports OpenCode `>=2.1.4 <3`; `master` retains the V1 implementation.
 * Moved observer settings from V1 host config to the TUI plugin's `options.observer`; V1 configuration and event adapters are not shipped.
 
 ### Security

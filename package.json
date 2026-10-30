@@ -1,6 +1,6 @@
 {
   "name": "@yohi/sibyl",
-  "version": "3.0.0-alpha.1",
+  "version": "3.0.0",
   "description": "Read-only OpenCode sidebar observer for direct child-agent sessions",
   "type": "module",
   "repository": {
