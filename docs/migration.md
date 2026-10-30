@@ -7,7 +7,7 @@ pre-release; acceptance evidence and known API limitations are recorded below.
 
 ## Inventory
 
-| Capability | Decision | Evidence and remaining work |
+| Capability | Decision | Evidence |
 | --- | --- | --- |
 | TUI entry, sidebar, theme | PORT | Built plugin loaded in isolated real V2 TUI; sidebar and direct child visible |
 | Core exports and packaging | PORT | `@opencode/plugin` and `@opencode/client` `2.1.4`; build/export tests pass |
