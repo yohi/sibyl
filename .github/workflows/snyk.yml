@@ -25,8 +25,8 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Generate package-lock.json for Snyk
-        run: npm install --package-lock-only
+      - name: Generate yarn.lock for Snyk
+        run: bun install --yarn
 
       - name: Run Snyk to check for vulnerabilities
         uses: snyk/actions/node@master
@@ -34,7 +34,7 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high --sarif-file-output=snyk.sarif
+          args: --all-projects --severity-threshold=high --sarif-file-output=snyk.sarif
 
       - name: Upload Snyk results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v3

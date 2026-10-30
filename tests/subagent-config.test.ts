@@ -2,27 +2,17 @@ import { describe, expect, test } from "bun:test";
 import { DEFAULT_OBSERVER_CONFIG, resolveObserverConfig } from "../src/subagent-config";
 
 describe("observer configuration", () => {
-  test("resolves every field independently as env over plugin over sibyl.observer over default", () => {
+  test("resolves each field independently as env over plugin over default", () => {
     const result = resolveObserverConfig({
       pluginOptions: { observer: { maxVisibleSubagents: 4, activityLimit: 3 } },
-      hostConfig: {
-        sibyl: {
-          observer: {
-            enabled: true,
-            maxVisibleSubagents: 2,
-            maxTrackedSubagents: 32,
-            showProvider: false,
-          },
-        },
-      },
       env: {
         SIBYL_OBSERVER_MAX_TRACKED_SUBAGENTS: "96",
         SIBYL_OBSERVER_SHOW_PROVIDER: "true",
       },
     });
 
-    expect(result.config).toEqual({
-      enabled: true,
+    expect(result).toEqual({
+      enabled: false,
       maxVisibleSubagents: 4,
       maxTrackedSubagents: 96,
       activityLimit: 3,
@@ -34,17 +24,13 @@ describe("observer configuration", () => {
     });
   });
 
-  test("detects and discards every legacy source", () => {
+  test("discards legacy values without retaining sensitive settings", () => {
     const result = resolveObserverConfig({
       pluginOptions: {
         enabled: true,
         maxPanes: 1,
         serverUrl: "https://legacy.test",
         directory: "/legacy",
-      },
-      hostConfig: {
-        sibyl: { subagentDisplay: { enabled: true, maxPanes: 1 } },
-        akane: { experimental: { watchdog: { subagentDisplay: { enabled: true } } } },
       },
       env: {
         SIBYL_SUBAGENT_ENABLED: "true",
@@ -56,8 +42,7 @@ describe("observer configuration", () => {
       },
     });
 
-    expect(result.legacySettingsDetected).toBe(true);
-    expect(result.config).toEqual(DEFAULT_OBSERVER_CONFIG);
+    expect(result).toEqual(DEFAULT_OBSERVER_CONFIG);
     expect(JSON.stringify(result)).not.toContain("must-not-flow");
   });
 
@@ -65,7 +50,6 @@ describe("observer configuration", () => {
     expect(() =>
       resolveObserverConfig({
         pluginOptions: { observer: { activityLimit: 5 } },
-        hostConfig: { sibyl: { observer: { activityLimit: 4 } } },
         env: { SIBYL_OBSERVER_ACTIVITY_LIMIT: "0" },
       }),
     ).toThrow("Invalid observer activityLimit");
@@ -75,7 +59,6 @@ describe("observer configuration", () => {
     expect(() =>
       resolveObserverConfig({
         pluginOptions: { observer: "true", enabled: true },
-        hostConfig: {},
         env: {},
       }),
     ).toThrow("Invalid observer configuration");

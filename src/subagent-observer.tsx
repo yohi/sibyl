@@ -1,4 +1,4 @@
-import type { TuiThemeCurrent } from "@opencode-ai/plugin/tui";
+import type { SidebarTheme as TuiThemeCurrent } from "./sidebar-theme.js";
 import type { RGBA } from "@opentui/core";
 import { For, Show, createEffect, createSignal, onCleanup } from "solid-js";
 import type { JSX } from "@opentui/solid";
@@ -138,7 +138,7 @@ export function SidebarObserver(props: SidebarObserverProps): JSX.Element {
             view={view}
             config={props.config}
             theme={props.theme}
-            category={props.categoryFor?.(view.sessionId)}
+            category={props.categoryFor?.(view.sessionId) ?? view.category}
           />
         )}
       </For>

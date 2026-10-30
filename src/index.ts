@@ -1,4 +1,3 @@
-export { OpenTuiPaneBackend } from "./opentui-pane-backend.js";
 export { PtyManager } from "./pty-manager.js";
 export { stripAnsi } from "./ansi-strip.js";
 export { closePane, findPane, nextLeaf, prevLeaf, splitPane } from "./keymap.js";
@@ -14,3 +13,6 @@ export * from "./subagent-normalizer.js";
 export * from "./subagent-event-source.js";
 export * from "./subagent-snapshot-reader.js";
 export * from "./subagent-registry.js";
+export * from "./subagent-v2-content.js";
+export * from "./subagent-v2-events.js";
+export * from "./subagent-v2-snapshot.js";
