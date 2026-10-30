@@ -37,8 +37,10 @@ function projectTool(
   if (status !== "pending" && status !== "running" && status !== "completed" && status !== "error")
     return undefined;
   const time = isRecord(part.time) ? part.time : {};
-  const timestamp =
-    status === "running" ? time.ran : status === "pending" ? time.created : time.completed;
+  let timestamp: unknown;
+  if (status === "running") timestamp = time.ran;
+  else if (status === "pending") timestamp = time.created;
+  else timestamp = time.completed;
   return {
     kind: "tool",
     sessionId,

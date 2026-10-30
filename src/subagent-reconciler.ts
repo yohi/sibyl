@@ -11,28 +11,26 @@ export function createObserverReconciler(deps: {
   let dirty = false;
   let pending: Promise<void> | undefined;
   let timer: ReturnType<typeof setInterval> | undefined;
+  const refresh = async (): Promise<void> => {
+    try {
+      await deps.refresh();
+    } catch {
+      deps.logger.warn("[subagent] reconciliation failed");
+    }
+  };
   const request = (): void => {
     if (!active || stopped) return;
     if (pending) {
       dirty = true;
       return;
     }
-    try {
-      pending = deps
-        .refresh()
-        .catch(() => {
-          deps.logger.warn("[subagent] reconciliation failed");
-        })
-        .finally(() => {
-          pending = undefined;
-          if (dirty && active && !stopped) {
-            dirty = false;
-            request();
-          }
-        });
-    } catch {
-      deps.logger.warn("[subagent] reconciliation failed");
-    }
+    pending = refresh().finally(() => {
+      pending = undefined;
+      if (dirty && active && !stopped) {
+        dirty = false;
+        request();
+      }
+    });
   };
   return {
     setActive(value: boolean): void {
