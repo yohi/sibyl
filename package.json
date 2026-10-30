@@ -78,5 +78,9 @@
   },
   "dependencies": {
     "@babel/core": "^7.23.3"
+  },
+  "overrides": {
+    "seroval": "^1.6.10",
+    "seroval-plugins": "^1.6.10"
   }
 }
