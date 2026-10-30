@@ -54,6 +54,18 @@ function projectTool(
   };
 }
 
+function projectContentPart(
+  part: unknown,
+  index: number,
+  context: { readonly sessionId: string; readonly messageId: string; readonly observedAt: number },
+): SafePartProjection | undefined {
+  if (!isRecord(part)) return undefined;
+  if (part.type === "text" && typeof part.text === "string") {
+    return projectText(part.text, index, context);
+  }
+  return projectTool(part, context.sessionId, context.messageId, context.observedAt);
+}
+
 export function projectAssistantContent(
   value: unknown,
   context: { readonly sessionId: string; readonly messageId: string; readonly observedAt: number },
@@ -65,14 +77,13 @@ export function projectAssistantContent(
   const result: SafePartProjection[] = [];
   let latestText: SafePartProjection | undefined;
   for (const [index, part] of value.content.entries()) {
-    if (!isRecord(part)) continue;
-    if (part.type === "text" && typeof part.text === "string") {
-      const text = projectText(part.text, index, { ...context, sessionId, messageId });
-      if (text !== undefined) latestText = text;
-    } else {
-      const tool = projectTool(part, sessionId, messageId, context.observedAt);
-      if (tool !== undefined) result.push(tool);
-    }
+    const projection = projectContentPart(part, index, {
+      ...context,
+      sessionId,
+      messageId,
+    });
+    if (projection?.kind === "assistant-text") latestText = projection;
+    else if (projection !== undefined) result.push(projection);
   }
   return latestText === undefined ? result : [latestText, ...result];
 }

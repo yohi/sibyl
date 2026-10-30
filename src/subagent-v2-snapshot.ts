@@ -59,6 +59,39 @@ function compareCandidates(a: Candidate, b: Candidate): number {
   );
 }
 
+function trackCandidate(
+  item: SessionInfo,
+  parentSessionId: string,
+  ignoredSessionIds: ReadonlySet<string>,
+  ignored: Set<string>,
+  candidates: Candidate[],
+  active: Readonly<Record<string, { readonly type: "running" }>>,
+  maxTrackedSubagents: number,
+): number {
+  const session = projectSession(item);
+  if (!session || session.parentSessionId !== parentSessionId) return 0;
+  if (ignoredSessionIds.has(session.id)) {
+    ignored.add(session.id);
+    return 0;
+  }
+  candidates.push({ session, status: candidateStatus(active, item), idleAt: item.time.idle });
+  candidates.sort(compareCandidates);
+  if (candidates.length > maxTrackedSubagents) candidates.pop();
+  return 1;
+}
+
+function nextCursor(
+  page: Awaited<ReturnType<V2SnapshotClient["list"]>>,
+  cursors: Set<string>,
+): string | undefined {
+  const next = page.cursor.next ?? undefined;
+  if (next === undefined) return undefined;
+  if (cursors.has(next) || cursors.size >= 4096)
+    throw new Error("Session pagination cursor repeated or exceeded limit");
+  cursors.add(next);
+  return next;
+}
+
 async function collectCandidates(
   client: V2SnapshotClient,
   parentSessionId: string,
@@ -82,25 +115,17 @@ async function collectCandidates(
       signal,
     );
     signal.throwIfAborted();
-    for (const item of page.data) {
-      const session = projectSession(item);
-      if (!session || session.parentSessionId !== parentSessionId) continue;
-      if (ignoredSessionIds.has(session.id)) {
-        ignored.add(session.id);
-        continue;
-      }
-      total += 1;
-      candidates.push({ session, status: candidateStatus(active, item), idleAt: item.time.idle });
-      candidates.sort(compareCandidates);
-      if (candidates.length > config.maxTrackedSubagents) candidates.pop();
-    }
-    const next = page.cursor.next ?? undefined;
-    if (next !== undefined) {
-      if (cursors.has(next) || cursors.size >= 4096)
-        throw new Error("Session pagination cursor repeated or exceeded limit");
-      cursors.add(next);
-    }
-    cursor = next;
+    for (const item of page.data)
+      total += trackCandidate(
+        item,
+        parentSessionId,
+        ignoredSessionIds,
+        ignored,
+        candidates,
+        active,
+        config.maxTrackedSubagents,
+      );
+    cursor = nextCursor(page, cursors);
   } while (cursor !== undefined);
   return { candidates, ignored, total };
 }
