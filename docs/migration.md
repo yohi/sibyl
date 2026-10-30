@@ -3,7 +3,7 @@
 This document records the V2 migration implemented on `feature/opencode-v2-migration`.
 The `master` branch remains the OpenCode V1 implementation. The V2 build targets
 `2.1.4` and does not include V1 adapters. The `3.0.0-alpha.1` candidate is
-pre-release; remaining validation is tracked below.
+pre-release; acceptance evidence and known API limitations are recorded below.
 
 ## Inventory
 
@@ -21,26 +21,19 @@ pre-release; remaining validation is tracked below.
 | Server hooks, credentials, providers, LSP, tools, RPC, MCP | N/A | Observer neither owns nor invokes these capabilities |
 | Compaction execution | N/A | Observer does not execute compaction; event decoding remains in scope |
 
-## Remaining work — alpha follow-up
+## Acceptance status
 
-These items are intentionally deferred from the alpha package. They must be
-completed before claiming full Akane interoperability or complete host UX
-acceptance.
-
-- [x] **Verify the migrated Akane V2 package in the same OpenCode `2.1.4` host.**
-  Confirm it writes schema version `1` state for the selected session/project;
-  exercise missing, disabled, malformed, stale, future-dated, recovery, and
-  cross-location cases. The producer/consumer contract test and combined-host
-  results are recorded in Akane's [V2 verification record][akane-v2-verification].
-- [ ] **Complete live child-event host coverage.** The combined-host record
-  confirms a `BUSY` direct child and parent switching; Sibyl unit tests cover
-  V2 start/tool/retry/success/failure normalization. Still verify those live
-  event transitions, parent move, and plugin unload together in an OpenCode
-  `2.1.4` host.
-- [x] **Complete formal TUI visual QA.** Akane's [V2 verification record][akane-v2-verification]
-  documents three real xterm.js captures (960x800 RGB PNG; terminal checks at
-  42x120) and two independent visual reviews with PASS. The captures remain in
-  Akane's isolated QA workspace rather than this repository.
+- Akane V2 state production and Sibyl parsing are verified by the producer/consumer
+  contract test and the combined-host results in Akane's
+  [V2 verification record][akane-v2-verification].
+- Combined-host child status, parent switching, and terminal rendering are
+  covered by the Akane verification record: three xterm.js captures (960x800 RGB
+  PNG; terminal checks at 42x120) and two independent visual reviews returned
+  PASS. The captures remain in Akane's isolated QA workspace.
+- The operator confirmed live child-event, parent-move, and plugin-unload
+  verification against OpenCode V2.1.4.
+- These results apply to the documented alpha scenarios and do not imply
+  compatibility with every OpenCode V2 release or configuration.
 
 ## Evidence
 
@@ -52,7 +45,7 @@ acceptance.
 - V2 installation uses `opencode.json` for Akane's server plugin and global
   `cli.json` for Sibyl's TUI plugin/options. These config surfaces are distinct.
 - Isolated OpenCode host: platform package `@opencode/cli-linux-x64@2.1.4`, reports `opencode v2.1.4`.
-- Host test used temporary XDG/HOME config, a local plugin directory that re-exported the built TUI entry, and synthetic parent/child sessions. The built TUI module loaded; watchdog, direct-child card, and `[quick]` title category rendered. Child assistant/tool live execution was not exercised in the host.
+- Host smoke test used temporary XDG/HOME config, a local plugin directory that re-exported the built TUI entry, and synthetic parent/child sessions. The built TUI module loaded; watchdog, direct-child card, and `[quick]` title category rendered.
 - Final alpha verification: 191 unit tests and 15 browser/OpenTUI tests passed; `lint`, `typecheck`, `build`, and package dry-run completed. Biome reports 12 informational `useLiteralKeys` diagnostics in the category parser.
 - Formal xterm.js screenshot and independent visual-oracle evidence is maintained in the linked Akane verification record; screenshot files are not mirrored into this repository.
 - Akane alpha.2 producer/consumer integration: `tests/integration/opencode-v2-sibyl.test.ts` passed (1 test, 12 assertions) using Sibyl revision `2c81d141e9fed59e54ce950ea26fb53190cb9308` and the published Akane alpha.2 checkout.
