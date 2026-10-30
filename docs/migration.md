@@ -43,6 +43,7 @@ acceptance.
 
 ## Evidence
 
+- Alpha release: [`v3.0.0-alpha.1`](https://github.com/yohi/sibyl/releases/tag/v3.0.0-alpha.1); package `@yohi/sibyl@3.0.0-alpha.1` published to GitHub Packages with the `alpha` dist-tag. Commit: `2c81d141e9fed59e54ce950ea26fb53190cb9308`. Bun publish shasum: `318763df12e73ae71b4a2f78a3b5370adeb4e6ff`.
 - Published `@opencode/plugin` and `@opencode/client` artifacts: `2.1.4`.
 - npm integrity: `@opencode/plugin@2.1.4` `sha512-SGAkdGp0VRxos2BEkRiyRl75G7DtuvP0ywgiEiHz1PbdUwUe2EAURMrzFgLCYCpWEm/zaNrguxPDVL0carrCsA==`; `@opencode/client@2.1.4` `sha512-xNHP8Xu4wcq4G849Xnbb8IxYxMTzF0TqvohWVUQZH5aURrVHIIbHMfXbZY6s4i4C9kpVbwjXFFwWAo6KIK3oiw==`; Linux x64 CLI `@opencode/cli-linux-x64@2.1.4` `sha512-o8EJ0ZsT4dzDKN+0mpG2EKbNGzJyp+F1++Av28UReRVfiEv+N34eZEnN/unkiMoerKHad6W6Ii7k4ukTnPNmNQ==`.
 - Local development host before migration: OpenCode `1.19.0`.
